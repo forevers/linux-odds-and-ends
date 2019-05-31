@@ -18,7 +18,6 @@
 #include <stdio.h>
 #include <termios.h>
 #include <unistd.h>
-// #include <string
 
 using namespace::std;
 
