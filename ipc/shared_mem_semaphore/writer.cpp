@@ -195,7 +195,7 @@ int main()
                         }
                     }
 
-                    //* wrelease reader */
+                    //* release reader */
                     if (file_val == 10) {
                         shared_data_512->state = STATE_2;
                         running = false;
