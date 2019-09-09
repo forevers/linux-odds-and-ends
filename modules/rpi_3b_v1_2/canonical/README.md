@@ -53,9 +53,9 @@ $ sudo make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=<media 
 # LKM module build
 ## cross compile
 - simple Makefile for module construction
-    - $ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -C /home/steve/projects/rpi/kernel_builds/linux M=$(pwd) modules
+    - $ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -C <path to cross compiled kernel>/linux M=$(pwd) modules
 - inspect resultant module
-    - $ /home/steve/projects/rpi/rpi_tools/arm-bcm2708/arm-linux-gnueabihf/bin/arm-linux-gnueabihf-objdump ess_canonical.ko -d -j .modinfo
+    - $ <path to rpi_tools>/arm-bcm2708/arm-linux-gnueabihf/bin/arm-linux-gnueabihf-objdump ess_canonical.ko -d -j .modinfo
  vermagic=4.19.58-v7+
 - scp ko to target and test 
     - sudo insmod <module name>.ko
