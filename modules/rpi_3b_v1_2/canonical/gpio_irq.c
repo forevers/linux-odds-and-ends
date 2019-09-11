@@ -1,3 +1,4 @@
+#include <linux/delay.h> 
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
 
@@ -64,6 +65,7 @@ int gpio_irq_demo_init(void)
                     // configure gpio output
                     if (0 == (result = gpio_request(gpio_num_output_, "gpio_output_label"))) {
                         if (0 == (result = gpio_direction_output(gpio_num_output_, 0))) {
+                            int can_sleep;
                             gpio_export(gpio_num_output_, false);
                             /* TODO 
                                prink(KERN_INFO, "gpio output configuration success\n");
@@ -71,6 +73,24 @@ int gpio_irq_demo_init(void)
                                $ echo (and sudo echo) 8 > /proc/sys/kernel/printk don't work on rpi*/
                             pr_info("gpio output configuration success\n");
                             // prink(KERN_INFO, "gpio output configuration success\n");
+
+                            
+                            can_sleep = gpio_cansleep(gpio_num_output_);
+                            pr_info("gpio_cansleep(%x) = %d\n", gpio_num_output_, can_sleep);
+                            if (1 == can_sleep) {
+                                gpio_set_value_cansleep(gpio_num_output_, 1);
+                                mdelay(1000);
+                                gpio_set_value_cansleep(gpio_num_output_, 0);
+                                mdelay(1000);
+                                gpio_set_value_cansleep(gpio_num_output_, 1);
+                            } else {
+                                gpio_set_value(gpio_num_output_, 1);
+                                mdelay(1000);
+                                gpio_set_value(gpio_num_output_, 0);
+                                mdelay(1000);
+                                gpio_set_value(gpio_num_output_, 1);
+                            }
+
                         } else {
                             gpio_free(gpio_num_output_);
                             pr_err("gpio_direction_output() failure: %d\n", result);

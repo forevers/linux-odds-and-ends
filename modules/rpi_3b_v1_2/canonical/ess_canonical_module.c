@@ -11,10 +11,16 @@
         sudo rmmod
 */
 
+#include <linux/cdev.h>
+#include <linux/device.h>
+#include <linux/fs.h>
 #include <linux/init.h>
+// #include <sys/ioctl.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+
+#include "ess_canonical_module.h"
 
 MODULE_AUTHOR("Developer Name <developer_email>");
 MODULE_LICENSE("GPL");
@@ -24,6 +30,15 @@ MODULE_VERSION("0.1");
 #include "gpio_irq.h"
 #include "container_of.h"
 
+/* driver parameters */
+// #define ESS_MAGIC   'E'
+// _IO(MAGIC, SEQ_NO);
+#define NUM_DEVICES             1
+#define FIRST_REQUESTED_MINOR   0
+#define ESS_DEVICE_NAME         "ess-device-name"
+static struct class* ess_class;
+static struct cdev ess_cdev;
+static dev_t ess_dev_no;
 
 /* default module parameters */
 static char* module_string = "default module string";
@@ -47,6 +62,29 @@ static void log_parameters(void)
     return;
 }
 
+// static long
+// ioctl(struct file* f, unsigned int cmd, unsigned long arg) 
+// {
+//     switch(cmd) {
+//         case SET_SEQ_NO:
+//             pr_info("SET_SEQ_NO\n");
+//             break;
+//         case CLR_SEQ_NO:
+//             pr_info("CLR_SEQ_NO\n");
+//             break;
+//         return -ENOTTY;
+//     }
+// }
+
+// see include/linux/fs.h for full fops description
+static struct file_operations ess_fops =
+{
+  .owner = THIS_MODULE//,
+  // .open = my_open,
+  // .release = my_close,
+  // .read = my_read,
+  // .write = my_write
+};
 
 /* module load 
     for built-ins this code is placed in a mem section which is freed after init is complete
@@ -54,13 +92,48 @@ static void log_parameters(void)
 static int __init
 canonical_init(void)
 {
+    int ret;
+    int major;
+
     pr_info("canonical_init() entry\n");
 
+// TODO handle rets
     log_parameters();
 
     container_demo();
 
     gpio_irq_demo_init();
+
+    if (0 > (ret = alloc_chrdev_region(&ess_dev_no, FIRST_REQUESTED_MINOR, NUM_DEVICES, "ess_region"))) {
+        pr_err("alloc_chrdev_region() failure\n");
+        return ret;
+    }
+
+    /* request /sys/class entry */
+    if (NULL == (ess_class = class_create(THIS_MODULE, "ess_class"))) {
+        pr_err("class_create() failure\n");
+        return -1;
+    }
+
+    /* device node */
+    if (device_create(ess_class, NULL, ess_dev_no, NULL, ESS_DEVICE_NAME) == NULL) {
+        class_destroy(ess_class);
+        unregister_chrdev_region(ess_dev_no, 1);
+        return -1;
+    }
+
+    cdev_init(&ess_cdev, &ess_fops);
+    ess_cdev.owner = THIS_MODULE;
+
+    if (cdev_add(&ess_cdev, ess_dev_no, 1) == -1) {
+        device_destroy(ess_class, ess_dev_no);
+        class_destroy(ess_class);
+        unregister_chrdev_region(ess_dev_no, 1);
+        return -1;
+    }
+
+    major = MAJOR(ess_dev_no);
+    pr_info("major number : %d", major);
 
     pr_info("canonical_init() exit\n");
     return 0;
@@ -75,9 +148,14 @@ canonical_exit(void)
 
     gpio_irq_exit();
 
+    /* driver teardown */
+    device_destroy(ess_class, ess_dev_no);
+    class_destroy(ess_class);
+    unregister_chrdev_region(ess_dev_no, NUM_DEVICES);
+
     pr_info("canonical_exit() exit\n");
 }
-
+ 
 
 module_init(canonical_init);
 module_exit(canonical_exit);
