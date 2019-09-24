@@ -2,16 +2,21 @@
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
 
+// poll event reads
+static DECLARE_WAIT_QUEUE_HEAD(ess_read_queue_);
+static bool new_data_ready_ = false;
+
 #include "gpio_irq.h"
+#include "gpio_irq_global.h"
 
 /* This module uses the legacy interface for accessing and controlling the gpios.
 
    Rising edge triggered GPIO interrupt issuing kernal log message during IRQ.
    1.1 kohm R between the GPIO 27 input IRQ and driving GPO.
    Use /sys/class/gpio user space gpio configuration to toggle output pin
-     
+
      example to drive gp output pin 25 from userspace
-       
+
        // load module
        $ sudo insmod ess_canonical.ko
 
@@ -61,7 +66,7 @@ int gpio_irq_demo_init(void)
             gpio_export(gpio_num_irq_input_, false);
             if (0 <= (irq_number_ = gpio_to_irq(gpio_num_irq_input_))) {
                 if (0 == (result = request_irq(irq_number_, (irq_handler_t)gpio_irq_handler, IRQF_TRIGGER_RISING, "gpio_irq_handler", NULL))) {
-                    
+
                     // configure gpio output
                     if (0 == (result = gpio_request(gpio_num_output_, "gpio_output_label"))) {
                         if (0 == (result = gpio_direction_output(gpio_num_output_, 0))) {
@@ -74,20 +79,19 @@ int gpio_irq_demo_init(void)
                             pr_info("gpio output configuration success\n");
                             // prink(KERN_INFO, "gpio output configuration success\n");
 
-                            
                             can_sleep = gpio_cansleep(gpio_num_output_);
                             pr_info("gpio_cansleep(%x) = %d\n", gpio_num_output_, can_sleep);
                             if (1 == can_sleep) {
                                 gpio_set_value_cansleep(gpio_num_output_, 1);
-                                mdelay(1000);
+                                mdelay(10);
                                 gpio_set_value_cansleep(gpio_num_output_, 0);
-                                mdelay(1000);
+                                mdelay(10);
                                 gpio_set_value_cansleep(gpio_num_output_, 1);
                             } else {
                                 gpio_set_value(gpio_num_output_, 1);
-                                mdelay(1000);
+                                mdelay(10);
                                 gpio_set_value(gpio_num_output_, 0);
-                                mdelay(1000);
+                                mdelay(10);
                                 gpio_set_value(gpio_num_output_, 1);
                             }
 
@@ -119,6 +123,60 @@ int gpio_irq_demo_init(void)
 }
 
 
+ssize_t gpio_irq_demo_read(struct file *f, char __user *buff, size_t count, loff_t *pos)
+{
+    if (count) {
+        *buff = gpio_get_value(gpio_num_output_);
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+
+ssize_t gpio_irq_demo_write(struct file *f, const char __user *buff, size_t count, loff_t *pos)
+{
+    pr_info("gpio_irq_demo_write()\n");
+    pr_info("count = %d\n", count);
+
+    // must be value/delay pair
+    if (count % 2) return 0;
+
+    /* write value and msec sleep count */
+    pr_info("start gpio sequence\n");
+    while (count) {
+        pr_info("val = %d\n", (*buff == 0) ? 0 : 1);
+        gpio_set_value_cansleep(gpio_num_output_, (*buff == 0) ? 0 : 1);
+        buff++;
+        mdelay(*buff);
+        buff++;
+        count -= 2;
+    }
+    return count;
+
+}
+
+
+long gpio_irq_demo_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
+{
+    pr_info("gpio_irq_demo_ioctl()\n");
+
+    switch(cmd) {
+        case SET_SEQ_NO:
+            pr_info("SET_SEQ_NO\n");
+            gpio_set_value_cansleep(gpio_num_output_, 1);
+            break;
+        case CLR_SEQ_NO:
+            pr_info("CLR_SEQ_NO\n");
+            gpio_set_value_cansleep(gpio_num_output_, 0);
+            break;
+        return -ENOTTY;
+    }
+
+    return -1;
+}
+
+
 void gpio_irq_exit(void)
 {
     pr_info("num_irqs_: %d\n", num_irqs_);
@@ -131,10 +189,26 @@ void gpio_irq_exit(void)
 }
 
 
+/* support for select(), poll() and epoll() system calls */
+__poll_t gpio_irq_demo_poll(struct file *f, struct poll_table_struct *wait)
+{
+    unsigned int ret_val_mask = 0;
+
+    pr_info("gpio_irq_demo_poll() : pre\n");
+    poll_wait(f, &ess_read_queue_, wait);
+    pr_info("gpio_irq_demo_poll() : prost\n");
+
+    if (new_data_ready_) ret_val_mask = POLLIN | POLLRDNORM;
+
+    return ret_val_mask;
+}
+
 static irq_handler_t gpio_irq_handler(unsigned int irq, void* dev_id, struct pt_regs* regs)
 {
     pr_info("gpio_irq_handler()\n");
     pr_info("num_irqs_ = %d\n", ++num_irqs_);
+
+    wake_up_interruptible(&ess_read_queue_);
 
     return (irq_handler_t) IRQ_HANDLED;
 }
