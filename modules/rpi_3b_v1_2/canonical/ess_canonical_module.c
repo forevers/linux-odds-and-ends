@@ -13,6 +13,9 @@
         # Rules for ess-device-name
         KERNEL=="ess-device-name", SUBSYSTEM=="ess_class", MODE="0666"
 
+    // target module log realtime monitoring
+    $ dmesg -wH
+
     load syntax :
         $ sudo insmod ess_canonical.ko
         $ sudo insmod ess_canonical.ko module_string="test" module_int_val=5 module_intarray=5,10
@@ -44,8 +47,6 @@ MODULE_VERSION("0.1");
 #include "container_of.h"
 
 /* driver parameters */
-// #define ESS_MAGIC   'E'
-// _IO(MAGIC, SEQ_NO);
 #define NUM_DEVICES             1
 #define FIRST_REQUESTED_MINOR   0
 #define ESS_DEVICE_NAME         "ess-device-name"
@@ -108,7 +109,7 @@ static long ess_unlocked_ioctl(struct file *f, unsigned int cmd, unsigned long a
 #else
 static int ess_ioctl(struct inode *i, struct file *f, unsigned int cmd, unsigned long arg)
 {
-    return -1;
+    return -ENOTTY;;
 }
 #endif
 
