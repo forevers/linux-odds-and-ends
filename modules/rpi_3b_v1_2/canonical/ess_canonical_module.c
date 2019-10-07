@@ -24,6 +24,9 @@
             crw-rw-rw- 1 root root 240, 0 Sep 23 19:57 /dev/ess-device-name
         $ ./gpio_test
         $ sudo rmmod
+
+    references :
+        https://www.kernel.org/doc/html/v4.19/
 */
 
 #include <linux/cdev.h>
@@ -128,20 +131,6 @@ __poll_t ess_poll(struct file *f, struct poll_table_struct *wait)
     return gpio_irq_demo_poll(f, wait);
 }
 
-// static long
-// ioctl(struct file* f, unsigned int cmd, unsigned long arg) 
-// {
-//     switch(cmd) {
-//         case SET_SEQ_NO:
-//             pr_info("SET_SEQ_NO\n");
-//             break;
-//         case CLR_SEQ_NO:
-//             pr_info("CLR_SEQ_NO\n");
-//             break;
-//         return -ENOTTY;
-//     }
-// }
-
 // see include/linux/fs.h for full fops description
 static struct file_operations ess_fops =
 {
@@ -231,7 +220,7 @@ canonical_exit(void)
 
     pr_info("canonical_exit() exit\n");
 }
- 
+
 
 module_init(canonical_init);
 module_exit(canonical_exit);
