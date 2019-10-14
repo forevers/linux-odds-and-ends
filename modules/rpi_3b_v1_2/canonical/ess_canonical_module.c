@@ -214,6 +214,7 @@ canonical_exit(void)
     gpio_irq_exit();
 
     /* driver teardown */
+    pr_info("release driver resources\n");
     device_destroy(ess_class, ess_dev_no);
     class_destroy(ess_class);
     unregister_chrdev_region(ess_dev_no, NUM_DEVICES);

@@ -1,6 +1,6 @@
 // compiler options
-// $ g++ -g -O0 -std=c++14 -ggdb -o gpio_test main.cpp
-// $ clang++ -g -O0 -std=c++14 -o gpio_test main.cpp
+// $ g++ -g -O0 -std=c++14 -ggdb -lpthread -o gpio_test main.cpp
+// $ clang++ -g -O0 -std=c++14 -lpthread -o gpio_test main.cpp
 
 #include <climits>
 #include <errno.h>
@@ -8,17 +8,112 @@
 #include <iostream>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include <termios.h>
+#include <thread>
 #include <unistd.h>
 
 #include "gpio_irq_global.h"
 
 using namespace::std;
 
+class DutyCycle
+{
+public:
+    DutyCycle(std::string name, int fd) :
+        thread_(&DutyCycle::Run, this, name),
+        name_(name),
+        fd_(fd),
+        enabled_(true)
+    {
+        cout << "DutyCycle() constructor, name : " << name_ << endl;
+    }
+
+    ~DutyCycle()
+    {
+        cout << "DutyCycle() destructor, name : " << name_ << endl;
+
+        /* thread exit */
+        enabled_ = false;
+
+        /* set or clear ioctl will take driver out of toggle mode */
+        ioctl(fd_, ESS_CLR_GPIO);
+
+        cout << "pre join()" << endl;
+        thread_.join();
+        cout << "post join()" << endl;
+    }
+
+    // Parameterized Constructor
+    // DutyCycle(std::function<void()> func);
+ 
+    // Move Constructor
+    DutyCycle(DutyCycle && obj);
+ 
+    //Move Assignment Operator
+    DutyCycle & operator=(DutyCycle && obj);
+
+    /* unsupported operations */
+    /* no copy constructor */
+    DutyCycle(const DutyCycle&) = delete;
+    /* no Assignment opeartor */
+    DutyCycle& operator=(const DutyCycle&) = delete;
+
+private:
+
+    void Run(std::string command)
+    {
+        cout << "DutyCycle::Run() entry" << endl;
+
+        fd_set read_fd_set;
+
+        while (enabled_) {
+
+            int retval;
+            FD_ZERO(&read_fd_set);
+            FD_SET(fd_, &read_fd_set);
+
+            /* select blocking */
+            if (-1 != (retval = select(fd_+1, &read_fd_set, NULL, NULL, NULL))) {
+
+                /* capture event bulk data */
+                struct EventBulkData event_bulk_data;
+
+                int num_read = read(fd_, &event_bulk_data, sizeof(struct EventBulkData));
+                if (num_read == sizeof(struct EventBulkData)) {
+
+                    // TODO event_bulk_data.bulk_data
+                    uint64_t event_number = event_bulk_data.capture_event.event;
+                    cout << "event number : " << event_number << endl;
+
+                } else {
+                    cout << " read() failure : " << num_read << endl;
+                    break;
+                }
+            } else {
+                cout << "select() failure : " << strerror(errno) << endl;
+            }
+
+        }
+
+        cout << "thread " << name_ << " exit" << endl;
+    }
+
+    std::thread thread_;
+
+    std::string name_;
+
+    /* file descriptor to release any blocking poll() epoll() or select() calls */
+    int fd_;
+
+    bool enabled_;
+};
+
 enum class TestModeE {
     GPIO_TOGGLE_MODE,
     GPIO_DUTY_CYCLE_MODE,
 };
+
 
 
 void print_key_processing()
@@ -47,6 +142,8 @@ static void process_key_entry(int ess_fd)
     struct termios t;
     unsigned long duty_cycle_msec = 1000;
 
+    shared_ptr<DutyCycle> duty_cycle = nullptr;
+
     TestModeE test_mode = TestModeE::GPIO_TOGGLE_MODE;
 
     print_key_processing();
@@ -66,11 +163,30 @@ static void process_key_entry(int ess_fd)
             break;
         
         case 't':
-            test_mode = TestModeE::GPIO_TOGGLE_MODE;
+            cout << "Toggle Mode" << endl;
+            if (test_mode != TestModeE::GPIO_TOGGLE_MODE) {
+
+                /* set or clear ioctl will take driver out of toggle mode */
+                ioctl(ess_fd, ESS_CLR_GPIO);
+
+                /* destroy threaded duty cycle object */
+                duty_cycle = nullptr;
+                test_mode = TestModeE::GPIO_TOGGLE_MODE;
+            }
             break;
 
         case 'd':
-            test_mode = TestModeE::GPIO_DUTY_CYCLE_MODE;
+            cout << "Duty Cycle Mode" << endl;
+            if (test_mode != TestModeE::GPIO_DUTY_CYCLE_MODE) {
+                int retval;
+                test_mode = TestModeE::GPIO_DUTY_CYCLE_MODE;
+                if (0 == (retval = ioctl(ess_fd, ESS_DUTY_CYCLE_GPIO, duty_cycle_msec))) {
+                    ioctl(ess_fd, ESS_DUTY_CYCLE_GPIO, duty_cycle_msec);
+                    duty_cycle = std::make_shared<DutyCycle>("test", ess_fd);
+                } else {
+                    cout << "ESS_DUTY_CYCLE_GPIO config error : " << retval << endl;
+                }
+            }
             break;
 
         case 27:
@@ -134,6 +250,17 @@ static void process_key_entry(int ess_fd)
     t.c_lflag |= ICANON;
     t.c_lflag |= ECHO;
     tcsetattr(STDIN_FILENO, TCSANOW, &t);
+
+    /* release resources */
+    if (test_mode != TestModeE::GPIO_TOGGLE_MODE) {
+
+        /* set or clear ioctl will take driver out of toggle mode */
+        ioctl(ess_fd, ESS_CLR_GPIO);
+
+        /* destroy threaded duty cycle object */
+        duty_cycle = nullptr;
+        test_mode = TestModeE::GPIO_TOGGLE_MODE;
+    }
 }
 
 

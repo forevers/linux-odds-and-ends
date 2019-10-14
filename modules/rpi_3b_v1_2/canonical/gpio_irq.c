@@ -33,6 +33,8 @@
         $ echo out > direction
         $ echo 1 > value
         $ echo 0 > value
+        // unexport when complete
+        $ echo 25 > unexport
 
         // query interrupt status
         $ cat /proc/interrupts
@@ -64,28 +66,16 @@ static struct HrtData {
     unsigned long period_nsec;
 } *my_hrt_data_;
 
-/* capture event metadata */
-struct CaptureEvent {
-    bool rising;            /* is rising edge */
-    uint64_t event;         /* incrementing event number */
-};
-
-/* capture event bulk data */
-struct EventBulkData {
-    struct CaptureEvent capture_event;     /* raw capture event data */
-    ulong bulk_data[10];            /* bulk data associated with capture event */
-};
-
 /* work queue for bottom half interrupt processing */
 // TODO create custom ess workqueue */
 struct ESSWorkStructWrapper {
     struct work_struct event_work_struct;
     struct CircularBufferMod2 capture_event_buffer;    /* upper half irq data */
-    spinlock_t capture_event_spinlock;                  /* capture_event_buffer shared between irq and workqueue (or tasklet TODO) */
+    spinlock_t capture_event_spinlock;                 /* capture_event_buffer shared between irq and workqueue (or tasklet TODO) */
     wait_queue_head_t capture_event_waitqueue;         /* irq lower half processing by workqueue  (or tasklet TODO) */
-    uint64_t event;                                     /* incrementing event number */
+    uint64_t event;                                    /* incrementing event number */
     struct CircularBufferMod2 event_bulk_data_buffer;  /* lower half data */
-    struct mutex event_bulk_data_mtx;                   /* event_bulk_data_buffer access mutex */
+    struct mutex event_bulk_data_mtx;                  /* event_bulk_data_buffer access mutex */
 } ess_work_struct_wrapper_;
 
 
@@ -257,7 +247,7 @@ ssize_t gpio_irq_demo_read(struct file *f, char __user *buff, size_t count, loff
         mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
 
     } else {
-        /* read current value */
+        /* invalid read request size*/
         bytes_read = -EPERM;
     }
 
@@ -300,21 +290,38 @@ long gpio_irq_demo_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
     pr_info("gpio_irq_demo_ioctl()\n");
 
     switch(cmd) {
+
         case ESS_SET_GPIO:
+
             pr_info("ESS_SET_GPIO_SEQ_NUM\n");
             // cancel timer if active
             hrtimer_cancel(&my_hrt_data_->timer);
+
+            /* set gpo value */
             gpio_set_value_cansleep(gpio_num_output_, 1);
+
+            // TODO have a statefull behavior for handling ESS_DUTY_CYCLE_GPIO mode vs set/get mode
+            /* signal any blocked poll (select(), poll() or epoll() sys call) */
+            wake_up_interruptible(&(ess_work_struct_wrapper_.capture_event_waitqueue));
+
             break;
 
         case ESS_CLR_GPIO:
+
             pr_info("ESS_CLR_GPIO_SEQ_NUM\n");
             // cancel timer if active
             hrtimer_cancel(&my_hrt_data_->timer);
+
+            /* clear gpo */
             gpio_set_value_cansleep(gpio_num_output_, 0);
+
+            // TODO have a statefull behavior for handling ESS_DUTY_CYCLE_GPIO mode vs set/get mode
+            /* signal any blocked poll (select(), poll() or epoll() sys call) */
+            wake_up_interruptible(&(ess_work_struct_wrapper_.capture_event_waitqueue));
             break;
 
         case ESS_DUTY_CYCLE_GPIO:
+
             pr_info("ESS_DUTY_CYCLE_GPIO_SEQ_NUM\n");
             pr_info("period : %lu msec\n", arg);
             if (arg == 0) {
@@ -334,13 +341,14 @@ long gpio_irq_demo_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
             break;
 
         default:
+
             retval = -EPERM;
             break;
 
         return retval;
     }
 
-    return -1;
+    return retval;
 }
 
 
@@ -356,14 +364,19 @@ void gpio_irq_exit(void)
     gpio_unexport(gpio_num_output_);
     gpio_free(gpio_num_output_);
 
+
     /* timer resources */
+    pr_info("cancel active time\n");
     if (hrtimer_cancel(&my_hrt_data_->timer)) {
         pr_info("cancelled active timer\n");
     }
+    pr_info("free timer object\n");
     kfree(my_hrt_data_);
 
     /* queue resources */
+    pr_info("release capture_event_buffer\n");
     release(&ess_work_struct_wrapper_.capture_event_buffer);
+    pr_info("release event_bulk_data_buffer\n");
     release(&ess_work_struct_wrapper_.event_bulk_data_buffer);
 }
 
@@ -392,9 +405,11 @@ __poll_t gpio_irq_demo_poll(struct file *f, struct poll_table_struct *wait)
 {
     unsigned int ret_val_mask = 0;
 
-    pr_info("gpio_irq_demo_poll()\n");
+    pr_info("gpio_irq_demo_poll() entry \n");
 
     poll_wait(f, &(ess_work_struct_wrapper_.capture_event_waitqueue), wait);
+
+    pr_info("gpio_irq_demo_poll() capture_event_waitqueue signalled\n");
 
     /* validate data ready */
     mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);

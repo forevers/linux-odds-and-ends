@@ -22,13 +22,11 @@ int init(struct CircularBufferMod2* circular_buffer_mod2, size_t element_size, s
 
     pr_info("kmalloc() pre\n");
     if (NULL != (circular_buffer_mod2->buffer = kmalloc(num_elements * element_size, GFP_KERNEL))) {
-        pr_info("kmalloc() 1\n");
         circular_buffer_mod2->capacity = num_elements;
-        pr_info("kmalloc() 2\n");
-        circular_buffer_mod2->head = circular_buffer_mod2->tail = 0;
-        pr_info("kmalloc() 3\n");
+        circular_buffer_mod2->head = 1;
+        circular_buffer_mod2->tail = 0;
         circular_buffer_mod2->size = circular_buffer_mod2->peak = 0;
-        pr_info("kmalloc() 4\n");
+        pr_info("capacity : %d, head : %d, tail : %d\n", circular_buffer_mod2->capacity, circular_buffer_mod2->head, circular_buffer_mod2->tail);
     } else {
         ret_val = -ENOMEM;
     }
@@ -37,9 +35,9 @@ int init(struct CircularBufferMod2* circular_buffer_mod2, size_t element_size, s
     return ret_val;
 }
 
-void release(struct CircularBufferMod2* buffer)
+void release(struct CircularBufferMod2* circular_buffer_mod2)
 {
-    kfree(buffer);
+    kfree(circular_buffer_mod2->buffer);
 }
 
 _Bool empty(struct CircularBufferMod2* buffer)
@@ -49,7 +47,8 @@ _Bool empty(struct CircularBufferMod2* buffer)
 
 void clear(struct CircularBufferMod2* buffer)
 {
-    buffer->head = buffer->tail = 0;
+    buffer->head = 0;
+    buffer->tail = 1;
 }
 
 size_t events_pending(struct CircularBufferMod2* buffer)
