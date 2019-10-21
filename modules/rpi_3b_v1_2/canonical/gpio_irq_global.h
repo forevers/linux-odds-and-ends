@@ -24,7 +24,7 @@ struct CaptureEvent {
 /* capture event bulk data */
 struct EventBulkData {
     struct CaptureEvent capture_event;      /* raw capture event data */
-    ulong bulk_data[10];                    /* bulk data associated with capture event */
+    uint64_t bulk_data[10];                  /* bulk data associated with capture event */
 };
 
 #ifdef __cplusplus

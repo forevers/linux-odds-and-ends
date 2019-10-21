@@ -76,6 +76,8 @@ private:
             /* select blocking */
             if (-1 != (retval = select(fd_+1, &read_fd_set, NULL, NULL, NULL))) {
 
+                cout << "select() released" << endl;
+
                 /* capture event bulk data */
                 struct EventBulkData event_bulk_data;
 

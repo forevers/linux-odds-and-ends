@@ -8,6 +8,7 @@
 #include "circ_buffer_mod2_elements.h"
 #include "gpio_irq.h"
 #include "gpio_irq_global.h"
+#include "util.h"
 
 /* This module uses the legacy interface for accessing and controlling the gpios.
 
@@ -90,7 +91,7 @@ static enum hrtimer_restart my_kt_function(struct hrtimer *hr_timer)
         gpio_set_value(gpio_num_output_, gpio_toggle_value);
     }
 
-    pr_info("time_per_sec : %ld, time_per_nsec : %lu\n", my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
+    PR_INFO("time_per_sec : %ld, time_per_nsec : %lu", my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
 
     now  = ktime_get();
     interval = ktime_set(my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
@@ -151,10 +152,10 @@ int gpio_irq_demo_init(void)
                                        prink(KERN_INFO, "gpio output configuration success\n");
                                        $ cat /proc/sys/kernel/printk yeilds 3 as current level ... need 8 for info
                                        $ echo (and sudo echo) 8 > /proc/sys/kernel/printk don't work on rpi*/
-                                    pr_info("gpio output configuration success\n");
+                                    PR_INFO("gpio output configuration success");
 
                                     gpio_can_sleep_ = gpio_cansleep(gpio_num_output_);
-                                    pr_info("gpio_cansleep(%x) = %d\n", gpio_num_output_, gpio_can_sleep_);
+                                    PR_INFO("gpio_cansleep(%x) = %d", gpio_num_output_, gpio_can_sleep_);
                                     if (1 == gpio_can_sleep_) {
                                         gpio_set_value_cansleep(gpio_num_output_, 1);
                                         mdelay(10);
@@ -173,35 +174,35 @@ int gpio_irq_demo_init(void)
                                     my_hrt_data_ = kmalloc(sizeof(*my_hrt_data_), GFP_KERNEL);
                                     // CLOCK_REALTIME is network adjusted time vs CLOCK_MONOLITHIC for free running time
                                     // HRTIMER_MODE_REL relative time vs HRTIMER_MODE_ABS absolute time
-                                    pr_info("init the timer\n");
+                                    PR_INFO("init the timer");
                                     hrtimer_init(&my_hrt_data_->timer, CLOCK_REALTIME, HRTIMER_MODE_REL);
                                     my_hrt_data_->timer.function = my_kt_function;
 
                                 } else {
                                     gpio_free(gpio_num_output_);
-                                    pr_err("gpio_direction_output() failure: %d\n", result);
+                                    PR_ERR("gpio_direction_output() failure: %d", result);
                                 }
                             } else {
-                                pr_err("gpio_request() failure: %d\n", result);
+                                PR_ERR("gpio_request() failure: %d", result);
                             }
                         } else {
-                            pr_err("init() EventBulkData failure: %d\n", result);
+                            PR_ERR("init() EventBulkData failure: %d", result);
                         }                   
                     } else {
-                        pr_err("init() CaptureEvent failure: %d\n", result);
+                        PR_ERR("init() CaptureEvent failure: %d", result);
                     }
                 } else {
-                    pr_err("request_irq() failure: %d\n", result);
+                    PR_ERR("request_irq() failure: %d", result);
                 }
             } else {
-                pr_err("gpio_to_irq() failure: %d\n", irq_number_);
+                PR_ERR("gpio_to_irq() failure: %d", irq_number_);
             }
         } else {
-            pr_err("gpio_direction_input() failure: %d\n", result);
+            PR_ERR("gpio_direction_input() failure: %d", result);
             gpio_free(gpio_num_irq_input_);
         }
     } else {
-        pr_err("gpio_request() failure: %d\n", result);
+        PR_ERR("gpio_request() failure: %d", result);
     }
 
     return result;
@@ -212,7 +213,13 @@ ssize_t gpio_irq_demo_read(struct file *f, char __user *buff, size_t count, loff
 {
     ssize_t bytes_read = 0;
 
+    PR_INFO("entry");
+
+    PR_INFO("count passed: %zu, expect mod of %u", count, sizeof(struct EventBulkData));
+
     if (1 == count) {
+
+        PR_INFO("read current value");
 
         /* read current value */
         *buff = gpio_get_value(gpio_num_output_);
@@ -220,25 +227,33 @@ ssize_t gpio_irq_demo_read(struct file *f, char __user *buff, size_t count, loff
 
     } else if ((count % sizeof(struct EventBulkData)) == 0) {
 
-        struct CircularBufferMod2* event_bulk_data_buffer = &ess_work_struct_wrapper_.event_bulk_data_buffer;
         struct EventBulkData* event_bulk_data;
+        struct CircularBufferMod2* event_bulk_data_buffer;
+
+        PR_INFO("read oldest event");
+
+        event_bulk_data_buffer = &ess_work_struct_wrapper_.event_bulk_data_buffer;
 
         /* read from event_bulk_data_buffer */
         mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
 
-        while ( (count > sizeof(struct EventBulkData)) && events_avail(event_bulk_data_buffer)) {
+        while ( (count >= sizeof(struct EventBulkData)) && space(event_bulk_data_buffer)) {
 
-            if (NULL != (event_bulk_data = front_event(event_bulk_data_buffer))) {
+            count -= sizeof(struct EventBulkData);
+
+            if (NULL != (event_bulk_data = front(event_bulk_data_buffer))) {
 
                 if (!copy_to_user(buff, event_bulk_data, sizeof(struct EventBulkData))) {
                     buff += sizeof(struct EventBulkData);
                     bytes_read += sizeof(struct EventBulkData);
-                    pop_event(event_bulk_data_buffer);
+                    pop(event_bulk_data_buffer);
                 } else {
+                    PR_ERR("copy_to_user() failure");
                     bytes_read = -EPERM;
                     break;
                 }
             } else {
+                PR_ERR("front() failure");
                 bytes_read = -EPERM;
                 break;
             }
@@ -248,6 +263,7 @@ ssize_t gpio_irq_demo_read(struct file *f, char __user *buff, size_t count, loff
 
     } else {
         /* invalid read request size*/
+        PR_ERR("invalid read request size");
         bytes_read = -EPERM;
     }
 
@@ -259,8 +275,8 @@ ssize_t gpio_irq_demo_write(struct file *f, const char __user *buff, size_t coun
 {
     size_t counts_remaining = count;
 
-    pr_info("gpio_irq_demo_write()\n");
-    pr_info("count = %d\n", count);
+    PR_INFO("entry");
+    PR_INFO("count = %d", count);
 
     /* must be value/delay pair */
     if (count % 2) return (ssize_t)0;
@@ -269,9 +285,9 @@ ssize_t gpio_irq_demo_write(struct file *f, const char __user *buff, size_t coun
     hrtimer_cancel(&my_hrt_data_->timer);
 
     /* write value and msec sleep count */
-    pr_info("start gpio sequence\n");
+    PR_INFO("start gpio sequence");
     while (counts_remaining) {
-        pr_info("val = %d\n", (*buff == 0) ? 0 : 1);
+        PR_INFO("val = %d", (*buff == 0) ? 0 : 1);
         gpio_set_value_cansleep(gpio_num_output_, (*buff == 0) ? 0 : 1);
         buff++;
         mdelay(*buff);
@@ -287,13 +303,13 @@ long gpio_irq_demo_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
     long retval = 0;
 
-    pr_info("gpio_irq_demo_ioctl()\n");
+    PR_INFO("gpio_irq_demo_ioctl()");
 
     switch(cmd) {
 
         case ESS_SET_GPIO:
 
-            pr_info("ESS_SET_GPIO_SEQ_NUM\n");
+            PR_INFO("ESS_SET_GPIO_SEQ_NUM");
             // cancel timer if active
             hrtimer_cancel(&my_hrt_data_->timer);
 
@@ -308,22 +324,22 @@ long gpio_irq_demo_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 
         case ESS_CLR_GPIO:
 
-            pr_info("ESS_CLR_GPIO_SEQ_NUM\n");
+            PR_INFO("ESS_CLR_GPIO_SEQ_NUM");
             // cancel timer if active
             hrtimer_cancel(&my_hrt_data_->timer);
 
             /* clear gpo */
             gpio_set_value_cansleep(gpio_num_output_, 0);
 
-            // TODO have a statefull behavior for handling ESS_DUTY_CYCLE_GPIO mode vs set/get mode
+            // TODO have a statefull behavior for handling ESS_DUTY_CYCLE_GPIO mode vs set/get mode ... and sync the release of the user space call
             /* signal any blocked poll (select(), poll() or epoll() sys call) */
             wake_up_interruptible(&(ess_work_struct_wrapper_.capture_event_waitqueue));
             break;
 
         case ESS_DUTY_CYCLE_GPIO:
 
-            pr_info("ESS_DUTY_CYCLE_GPIO_SEQ_NUM\n");
-            pr_info("period : %lu msec\n", arg);
+            PR_INFO("ESS_DUTY_CYCLE_GPIO_SEQ_NUM");
+            PR_INFO("period : %lu msec", arg);
             if (arg == 0) {
                 if (hrtimer_cancel(&my_hrt_data_->timer)) {
                     pr_info("cancelled active timer\n");
@@ -331,7 +347,7 @@ long gpio_irq_demo_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
             } else {
                 my_hrt_data_->period_sec = arg / 1000;
                 my_hrt_data_->period_nsec = (arg - my_hrt_data_->period_sec*1000) *1000000;
-                pr_info("time_per_sec : %ld, time_per_nsec : %lu\n", my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
+                PR_INFO("time_per_sec : %ld, time_per_nsec : %lu", my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
 
                 my_hrt_data_->period = ktime_set(my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
                 // cancel and start new timer at specified period
@@ -356,7 +372,8 @@ void gpio_irq_exit(void)
 {
     // TODO consider to moving much of this to the close() call to allow potential HW sharing
 
-    pr_info("num_irqs_: %d\n", num_irqs_);
+    PR_INFO("entry");
+    PR_INFO("num_irqs_: %d", num_irqs_);
     free_irq(irq_number_, NULL);
     gpio_unexport(gpio_num_irq_input_);
     gpio_free(gpio_num_irq_input_);
@@ -364,19 +381,18 @@ void gpio_irq_exit(void)
     gpio_unexport(gpio_num_output_);
     gpio_free(gpio_num_output_);
 
-
     /* timer resources */
-    pr_info("cancel active time\n");
+    PR_INFO("cancel active time");
     if (hrtimer_cancel(&my_hrt_data_->timer)) {
-        pr_info("cancelled active timer\n");
+        PR_INFO("cancelled active timer");
     }
-    pr_info("free timer object\n");
+    PR_INFO("free timer object\n");
     kfree(my_hrt_data_);
 
     /* queue resources */
-    pr_info("release capture_event_buffer\n");
+    PR_INFO("release capture_event_buffer");
     release(&ess_work_struct_wrapper_.capture_event_buffer);
-    pr_info("release event_bulk_data_buffer\n");
+    PR_INFO("release event_bulk_data_buffer");
     release(&ess_work_struct_wrapper_.event_bulk_data_buffer);
 }
 
@@ -405,11 +421,11 @@ __poll_t gpio_irq_demo_poll(struct file *f, struct poll_table_struct *wait)
 {
     unsigned int ret_val_mask = 0;
 
-    pr_info("gpio_irq_demo_poll() entry \n");
+    PR_INFO("entry");
 
     poll_wait(f, &(ess_work_struct_wrapper_.capture_event_waitqueue), wait);
 
-    pr_info("gpio_irq_demo_poll() capture_event_waitqueue signalled\n");
+    PR_INFO("capture_event_waitqueue signalled");
 
     /* validate data ready */
     mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
@@ -424,24 +440,26 @@ static irq_handler_t gpio_irq_handler(unsigned int irq, void* dev_id, struct pt_
 {
     struct CircularBufferMod2* capture_event_buffer = &ess_work_struct_wrapper_.capture_event_buffer;
 
-    pr_info("gpio_irq_handler()\n");
-    pr_info("num_irqs_ = %d\n", ++num_irqs_);
+    static uint64_t counter = 0;
+
+    PR_INFO("entry");
+    PR_INFO("num_irqs_ = %d", ++num_irqs_);
 
     spin_lock(&ess_work_struct_wrapper_.capture_event_spinlock);
-    pr_info("capture_event_spinlock locked\n");
+    PR_INFO("capture_event_spinlock locked");
 
-     /* access capture_event_buffer */
-    if (events_avail(capture_event_buffer)) {
-        // log rising edge and count
+    /* access capture_event_buffer */
+    // log rising edge and count
+    {
         struct CaptureEvent capture_event;
         capture_event.rising = 1;
-        capture_event.event = ess_work_struct_wrapper_.event++;
-        push_event(capture_event_buffer, &capture_event);
-    } else {
-        pr_err("capture_event_buffer full : head = %d, tail = %d\n", capture_event_buffer->head, capture_event_buffer->head );
+        capture_event.event = counter++;
+        PR_INFO("pushing event %lld", capture_event.event);
+        push(capture_event_buffer, &capture_event);
     }
+
     spin_unlock(&ess_work_struct_wrapper_.capture_event_spinlock);
-    pr_info("capture_event_spinlock unlocked\n");
+    PR_INFO("capture_event_spinlock unlocked");
 
     // TODO pass info in regs
     schedule_work(&ess_work_struct_wrapper_.event_work_struct);
@@ -454,31 +472,51 @@ static irq_handler_t gpio_irq_handler(unsigned int irq, void* dev_id, struct pt_
 static void ess_do_work(struct work_struct* work)
 {
     struct ESSWorkStructWrapper* ess_work_struct_wrapper;
+    struct CaptureEvent* capture_event_ref;
+    struct CaptureEvent capture_event;
     unsigned long flags;
+    uint64_t idx;
 
-    pr_info("ess_do_work()\n");
+    PR_INFO("entry");
 
     spin_lock_irqsave(&ess_work_struct_wrapper_.capture_event_spinlock, flags);
     /* access capture_event_buffer */
-    if (events_avail(&ess_work_struct_wrapper_.capture_event_buffer)) {
-        // TODO
+    if (space(&ess_work_struct_wrapper_.capture_event_buffer)) {
+        
+        if (NULL != (capture_event_ref = front(&ess_work_struct_wrapper_.capture_event_buffer))) {
+            /* copy event */
+            PR_INFO("element_size : %zd", ess_work_struct_wrapper_.capture_event_buffer.element_size);
+            memcpy(&capture_event, capture_event_ref, ess_work_struct_wrapper_.capture_event_buffer.element_size);
+            pop(&ess_work_struct_wrapper_.capture_event_buffer);
+            PR_INFO("capture_event : %s, %lld", (capture_event.rising == true) ? "rising" : "falling", capture_event.event);
+        }
     }
-    pr_info("capture_event_spinlock locked\n");
+    PR_INFO("capture_event_spinlock locked");
     spin_unlock_irqrestore(&ess_work_struct_wrapper_.capture_event_spinlock, flags);
-    pr_info("capture_event_spinlock unlocked\n");
+    PR_INFO("capture_event_spinlock unlocked");
 
     ess_work_struct_wrapper = container_of(work, struct ESSWorkStructWrapper, event_work_struct);
 
     /* access event_bulk_data_buffer, shared by poll and read() */
     // TODO investigate interruptible version
     mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
-    pr_info("event_bulk_data_mtx locked\n");
-    if (events_avail(&ess_work_struct_wrapper_.event_bulk_data_buffer)) {
-        // TODO
+    PR_INFO("event_bulk_data_mtx locked");
+    if (space(&ess_work_struct_wrapper_.event_bulk_data_buffer)) {
+        if (NULL != capture_event_ref) {
+            /* capture event obtained */
+            // TODO consider providing event_bulk_data memory directly from buffer vs filling stack first then pushing
+            struct EventBulkData event_bulk_data;
+            memcpy(&event_bulk_data.capture_event, &capture_event, sizeof(struct CaptureEvent));
+            for (idx = 0; idx < 10; idx++) {
+                event_bulk_data.bulk_data[idx] = capture_event.event + idx;
+            }
+            
+            if (0 == push(&ess_work_struct_wrapper_.event_bulk_data_buffer, &event_bulk_data)) {
+                /* signal the blocked poll (select(), poll() or epoll() sys call) */
+                wake_up_interruptible(&(ess_work_struct_wrapper->capture_event_waitqueue));
+            }
+        }
     }
     mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
-    pr_info("event_bulk_data_mtx unlocked\n");
-
-    /* signal the blocked poll (select(), poll() or epoll() sys call) */
-    wake_up_interruptible(&(ess_work_struct_wrapper->capture_event_waitqueue));
+    PR_INFO("event_bulk_data_mtx unlocked");
 }
