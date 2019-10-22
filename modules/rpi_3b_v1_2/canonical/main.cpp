@@ -36,8 +36,8 @@ public:
         /* thread exit */
         enabled_ = false;
 
-        /* set or clear ioctl will take driver out of toggle mode */
-        ioctl(fd_, ESS_CLR_GPIO);
+        /* take driver out of toggle mode */
+        ioctl(fd_, ESS_DUTY_CYCLE_GPIO, 0);
 
         cout << "pre join()" << endl;
         thread_.join();
@@ -67,6 +67,7 @@ private:
 
         fd_set read_fd_set;
 
+        cout << "enabled_ = " << ((enabled_ == true) ? "true" : "false") << endl;
         while (enabled_) {
 
             int retval;
@@ -76,21 +77,18 @@ private:
             /* select blocking */
             if (-1 != (retval = select(fd_+1, &read_fd_set, NULL, NULL, NULL))) {
 
-                cout << "select() released" << endl;
+                if (FD_ISSET(fd_, &read_fd_set)) {
+                    cout << "select() released" << endl;
 
-                /* capture event bulk data */
-                struct EventBulkData event_bulk_data;
+                    /* capture event bulk data */
+                    struct EventBulkData event_bulk_data;
 
-                int num_read = read(fd_, &event_bulk_data, sizeof(struct EventBulkData));
-                if (num_read == sizeof(struct EventBulkData)) {
+                    while (sizeof(struct EventBulkData) == read(fd_, &event_bulk_data, sizeof(struct EventBulkData))) {
 
-                    // TODO event_bulk_data.bulk_data
-                    uint64_t event_number = event_bulk_data.capture_event.event;
-                    cout << "event number : " << event_number << endl;
-
-                } else {
-                    cout << " read() failure : " << num_read << endl;
-                    break;
+                        // TODO event_bulk_data.bulk_data
+                        uint64_t event_number = event_bulk_data.capture_event.event;
+                        cout << "event number : " << event_number << endl;
+                    }
                 }
             } else {
                 cout << "select() failure : " << strerror(errno) << endl;
@@ -277,6 +275,7 @@ int main()
 
         cout << "open() success : " << endl;
 
+#if 0
         // gpio write takes array of value / msec delay pairs
         uint8_t gpio_off[] = {0x00, 0xFF};
         if ((num_gpio_writes = write(ess_fd, gpio_off, sizeof(gpio_off))) >= 0) {
@@ -306,7 +305,7 @@ int main()
         ioctl(ess_fd, ESS_SET_GPIO);
         usleep(1000);
         ioctl(ess_fd, ESS_CLR_GPIO);
-
+#endif
         process_key_entry(ess_fd);
 
         /* close module handle */

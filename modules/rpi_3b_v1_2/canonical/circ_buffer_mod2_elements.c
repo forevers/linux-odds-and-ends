@@ -68,7 +68,9 @@ size_t size(struct CircularBufferMod2* buffer)
 // size_t events_avail(struct CircularBufferMod2* buffer)
 size_t space(struct CircularBufferMod2* buffer)
 {
-    PR_INFO("capacity : %d, head : %lld, tail : %lld", buffer->capacity, buffer->head, buffer->tail);
+    size_t space = ((buffer->tail - (buffer->head+1)) & (buffer->size-1));
+    PR_INFO("capacity : %d, space : %zu, head : %lld, tail : %lld", buffer->capacity, space, buffer->head, buffer->tail);
+
     return ((buffer->tail - (buffer->head+1)) & (buffer->size-1));
 }
 

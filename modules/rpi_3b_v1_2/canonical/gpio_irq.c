@@ -71,12 +71,13 @@ static struct HrtData {
 // TODO create custom ess workqueue */
 struct ESSWorkStructWrapper {
     struct work_struct event_work_struct;
-    struct CircularBufferMod2 capture_event_buffer;    /* upper half irq data */
-    spinlock_t capture_event_spinlock;                 /* capture_event_buffer shared between irq and workqueue (or tasklet TODO) */
-    wait_queue_head_t capture_event_waitqueue;         /* irq lower half processing by workqueue  (or tasklet TODO) */
-    uint64_t event;                                    /* incrementing event number */
-    struct CircularBufferMod2 event_bulk_data_buffer;  /* lower half data */
-    struct mutex event_bulk_data_mtx;                  /* event_bulk_data_buffer access mutex */
+    struct CircularBufferMod2 capture_event_buffer;     /* upper half irq data */
+    spinlock_t capture_event_spinlock;                  /* capture_event_buffer shared between irq and workqueue (or tasklet TODO) */
+    bool poll_enabled;                                  /* device supports polling */ 
+    wait_queue_head_t capture_event_waitqueue;          /* irq lower half processing by workqueue (or tasklet TODO) */
+    uint64_t event;                                     /* incrementing event number */
+    struct CircularBufferMod2 event_bulk_data_buffer;   /* lower half data */
+    struct mutex event_bulk_data_mtx;                   /* event_bulk_data_buffer access mutex */
 } ess_work_struct_wrapper_;
 
 
@@ -132,6 +133,7 @@ int gpio_irq_demo_init(void)
                         if (0 == (result = init(&ess_work_struct_wrapper_.event_bulk_data_buffer, sizeof(struct EventBulkData), MAX_MOD_2_BUFFER_ELEMENTS(EventBulkData)))) {
 
                             ess_work_struct_wrapper_.event = 0;
+                            ess_work_struct_wrapper_.poll_enabled = false;
 
                             /* irq reads fill capture_event_buffer */
                             init_waitqueue_head(&ess_work_struct_wrapper_.capture_event_waitqueue);
@@ -156,6 +158,7 @@ int gpio_irq_demo_init(void)
 
                                     gpio_can_sleep_ = gpio_cansleep(gpio_num_output_);
                                     PR_INFO("gpio_cansleep(%x) = %d", gpio_num_output_, gpio_can_sleep_);
+#if 0
                                     if (1 == gpio_can_sleep_) {
                                         gpio_set_value_cansleep(gpio_num_output_, 1);
                                         mdelay(10);
@@ -169,7 +172,7 @@ int gpio_irq_demo_init(void)
                                         mdelay(10);
                                         gpio_set_value(gpio_num_output_, 1);
                                     }
-
+#endif
                                     // high res timer
                                     my_hrt_data_ = kmalloc(sizeof(*my_hrt_data_), GFP_KERNEL);
                                     // CLOCK_REALTIME is network adjusted time vs CLOCK_MONOLITHIC for free running time
@@ -318,6 +321,7 @@ long gpio_irq_demo_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 
             // TODO have a statefull behavior for handling ESS_DUTY_CYCLE_GPIO mode vs set/get mode
             /* signal any blocked poll (select(), poll() or epoll() sys call) */
+            ess_work_struct_wrapper_.poll_enabled = false;
             wake_up_interruptible(&(ess_work_struct_wrapper_.capture_event_waitqueue));
 
             break;
@@ -333,6 +337,7 @@ long gpio_irq_demo_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 
             // TODO have a statefull behavior for handling ESS_DUTY_CYCLE_GPIO mode vs set/get mode ... and sync the release of the user space call
             /* signal any blocked poll (select(), poll() or epoll() sys call) */
+            ess_work_struct_wrapper_.poll_enabled = false;
             wake_up_interruptible(&(ess_work_struct_wrapper_.capture_event_waitqueue));
             break;
 
@@ -340,19 +345,30 @@ long gpio_irq_demo_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 
             PR_INFO("ESS_DUTY_CYCLE_GPIO_SEQ_NUM");
             PR_INFO("period : %lu msec", arg);
+
             if (arg == 0) {
+
+                PR_INFO("cancel duty cycle mode");
                 if (hrtimer_cancel(&my_hrt_data_->timer)) {
                     pr_info("cancelled active timer\n");
                 }
+
+                ess_work_struct_wrapper_.poll_enabled = false;
+                wake_up_interruptible(&(ess_work_struct_wrapper_.capture_event_waitqueue));
+
             } else {
+
                 my_hrt_data_->period_sec = arg / 1000;
                 my_hrt_data_->period_nsec = (arg - my_hrt_data_->period_sec*1000) *1000000;
                 PR_INFO("time_per_sec : %ld, time_per_nsec : %lu", my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
+
+                ess_work_struct_wrapper_.poll_enabled = true;
 
                 my_hrt_data_->period = ktime_set(my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
                 // cancel and start new timer at specified period
                 hrtimer_cancel(&my_hrt_data_->timer);
                 hrtimer_start(&my_hrt_data_->timer, my_hrt_data_->period, HRTIMER_MODE_REL);
+
             }
             break;
 
@@ -422,14 +438,22 @@ __poll_t gpio_irq_demo_poll(struct file *f, struct poll_table_struct *wait)
     unsigned int ret_val_mask = 0;
 
     PR_INFO("entry");
+    PR_INFO("ess_work_struct_wrapper_.poll_enabled == %s", ((ess_work_struct_wrapper_.poll_enabled == true) ? "true" : "false"));
 
     poll_wait(f, &(ess_work_struct_wrapper_.capture_event_waitqueue), wait);
 
-    PR_INFO("capture_event_waitqueue signalled");
+    PR_INFO("poll block release");
 
     /* validate data ready */
     mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
-    if (!empty(&ess_work_struct_wrapper_.event_bulk_data_buffer))  ret_val_mask = POLLIN | POLLRDNORM;
+    if (!empty(&ess_work_struct_wrapper_.event_bulk_data_buffer)) {
+        PR_INFO("POLLIN | POLLRDNORM");
+        ret_val_mask = POLLIN | POLLRDNORM;
+    } else {
+        PR_INFO("poll sleep");
+        if (false == ess_work_struct_wrapper_.poll_enabled)
+            ret_val_mask = POLLHUP;
+    }
     mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
 
     return ret_val_mask;
@@ -482,7 +506,7 @@ static void ess_do_work(struct work_struct* work)
     spin_lock_irqsave(&ess_work_struct_wrapper_.capture_event_spinlock, flags);
     /* access capture_event_buffer */
     if (space(&ess_work_struct_wrapper_.capture_event_buffer)) {
-        
+
         if (NULL != (capture_event_ref = front(&ess_work_struct_wrapper_.capture_event_buffer))) {
             /* copy event */
             PR_INFO("element_size : %zd", ess_work_struct_wrapper_.capture_event_buffer.element_size);
@@ -510,9 +534,10 @@ static void ess_do_work(struct work_struct* work)
             for (idx = 0; idx < 10; idx++) {
                 event_bulk_data.bulk_data[idx] = capture_event.event + idx;
             }
-            
+
             if (0 == push(&ess_work_struct_wrapper_.event_bulk_data_buffer, &event_bulk_data)) {
                 /* signal the blocked poll (select(), poll() or epoll() sys call) */
+                PR_INFO("wake_up_interruptible()");
                 wake_up_interruptible(&(ess_work_struct_wrapper->capture_event_waitqueue));
             }
         }
