@@ -2,6 +2,7 @@
 #include <stddef.h>
 
 #include "container_of.h"
+#include "util.h"
 
 /* container_of */
 struct Container {
@@ -29,14 +30,14 @@ void container_demo(void)
     while (iter != NULL) {
         int* data;
         struct Container* this_container;
-        pr_info("iter->data_a : %d\n", iter->data_a);
+        PR_INFO("iter->data_a : %d", iter->data_a);
 
         /* container_of example 
             obtain container reference and verify its value
         */
         data = &iter->data_a;
         this_container = container_of(data, struct Container, data_a);
-        pr_info("this_container->data_a : %d\n", this_container->data_a);
+        PR_INFO("this_container->data_a : %d", this_container->data_a);
 
         /* advance list iterator */
         iter = iter->next_container;

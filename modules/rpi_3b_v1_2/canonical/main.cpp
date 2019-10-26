@@ -39,20 +39,13 @@ public:
         /* take driver out of toggle mode */
         ioctl(fd_, ESS_DUTY_CYCLE_GPIO, 0);
 
-        cout << "pre join()" << endl;
         thread_.join();
-        cout << "post join()" << endl;
     }
 
-    // Parameterized Constructor
-    // DutyCycle(std::function<void()> func);
- 
     // Move Constructor
-    DutyCycle(DutyCycle && obj);
- 
+    DutyCycle(DutyCycle && obj) = delete;
     //Move Assignment Operator
-    DutyCycle & operator=(DutyCycle && obj);
-
+    DutyCycle & operator=(DutyCycle && obj) = delete;
     /* unsupported operations */
     /* no copy constructor */
     DutyCycle(const DutyCycle&) = delete;
@@ -78,7 +71,7 @@ private:
             if (-1 != (retval = select(fd_+1, &read_fd_set, NULL, NULL, NULL))) {
 
                 if (FD_ISSET(fd_, &read_fd_set)) {
-                    cout << "select() released" << endl;
+                    // cout << "select() released" << endl;
 
                     /* capture event bulk data */
                     struct EventBulkData event_bulk_data;
@@ -111,6 +104,7 @@ private:
 
 enum class TestModeE {
     GPIO_TOGGLE_MODE,
+    GPIO_BURST_MODE,
     GPIO_DUTY_CYCLE_MODE,
 };
 
@@ -127,6 +121,7 @@ void print_key_processing()
 
     cout << "  q - quit" << endl;
     cout << "  t - place in toggle mode" << endl;
+    cout << "  b - place in burst mode" << endl;
     cout << "  d - place in duty cycle mode" << endl;
     cout << "  <up key> - increment mode setting" << endl;
     cout << "  <down key> - decrement mode setting" << endl;
@@ -141,6 +136,14 @@ static void process_key_entry(int ess_fd)
     int ch;
     struct termios t;
     unsigned long duty_cycle_msec = 1000;
+    uint8_t short_period_msec = 0x3F;
+    uint8_t long_period_msec = 0xFF;
+    uint8_t gpio_burst_sequence[] = {
+        0x00, short_period_msec,
+        0xFF, short_period_msec,
+        0x00, short_period_msec,
+        0xFF, long_period_msec,
+        0x00, short_period_msec};
 
     shared_ptr<DutyCycle> duty_cycle = nullptr;
 
@@ -157,11 +160,34 @@ static void process_key_entry(int ess_fd)
     while ('q' != (ch = getchar())) {
 
         switch (ch) {
-        
+
         case 'h':
             print_key_processing();
             break;
-        
+
+        case 'b':
+            cout << "Burst Mode" << endl;
+            if (test_mode != TestModeE::GPIO_BURST_MODE) {
+
+                short_period_msec = 0x3F;
+                long_period_msec = 0xFF;
+
+                /* set or clear ioctl will take driver out of toggle mode */
+                gpio_burst_sequence[3] = short_period_msec;
+                gpio_burst_sequence[7] = long_period_msec;
+                int num_gpio_writes = write(ess_fd, gpio_burst_sequence, sizeof(gpio_burst_sequence));
+                if (num_gpio_writes >= 0) {
+                    cout << "num_gpio_writes : " << num_gpio_writes << endl;
+                } else {
+                    cout << "write() failure : " << num_gpio_writes << endl;
+                }
+
+                /* destroy threaded duty cycle object */
+                duty_cycle = nullptr;
+                test_mode = TestModeE::GPIO_BURST_MODE;
+            }
+            break;
+
         case 't':
             cout << "Toggle Mode" << endl;
             if (test_mode != TestModeE::GPIO_TOGGLE_MODE) {
@@ -191,7 +217,7 @@ static void process_key_entry(int ess_fd)
 
         case 27:
             bool advance_mode;
-            
+
             // up/down arrow
             if (91 == getchar()) {
                 int key_val = getchar();
@@ -206,15 +232,33 @@ static void process_key_entry(int ess_fd)
 
             switch(test_mode) {
 
+            case TestModeE::GPIO_BURST_MODE:
+                int num_gpio_writes;
+                if ( (true == advance_mode) && (gpio_burst_sequence[7] < UCHAR_MAX) ) {
+                    /* advance high pulse time if not already at max */
+                    gpio_burst_sequence[3]++; gpio_burst_sequence[7]++;
+                } else if ( (false == advance_mode) && (gpio_burst_sequence[1] > 1) ) {
+                    /* reduce high pulse time if not already at min */
+                    gpio_burst_sequence[3]--; gpio_burst_sequence[7]--;
+                }
+                num_gpio_writes = write(ess_fd, gpio_burst_sequence, sizeof(gpio_burst_sequence));
+                if (num_gpio_writes >= 0) {
+                    cout << "num_gpio_writes : " << num_gpio_writes << endl;
+                } else {
+                    cout << "write() failure : " << num_gpio_writes << endl;
+                }
+
+                break;
+
             case TestModeE::GPIO_TOGGLE_MODE:
                 uint8_t gpio_val;
                 ssize_t num_read;
                 if ((num_read = read(ess_fd, &gpio_val, 1)) == 1) {
                     if (gpio_val) {
-                        cout << "ESS_CLR_GPIO" << endl;
+                        cout << "clear GPIO" << endl;
                         ioctl(ess_fd, ESS_CLR_GPIO);
                     } else {
-                        cout << "ESS_SET_GPIO" << endl;
+                        cout << "set GPIO" << endl;
                         ioctl(ess_fd, ESS_SET_GPIO);
                     }
                 } else {
@@ -275,37 +319,6 @@ int main()
 
         cout << "open() success : " << endl;
 
-#if 0
-        // gpio write takes array of value / msec delay pairs
-        uint8_t gpio_off[] = {0x00, 0xFF};
-        if ((num_gpio_writes = write(ess_fd, gpio_off, sizeof(gpio_off))) >= 0) {
-            cout << "num_gpio_writes : " << num_gpio_writes << endl;
-        } else {
-            cout << "write() failure : " << num_gpio_writes << endl;
-        }
-
-        uint8_t gpio_on[] = {0xFF, 0xFF};
-        if ((num_gpio_writes = write(ess_fd, gpio_on, sizeof(gpio_on))) >= 0) {
-            cout << "num_gpio_writes : " << num_gpio_writes << endl;
-        } else {
-            cout << "write() failure : " << num_gpio_writes << endl;
-        }
-
-        uint8_t gpio_sequence[] = {
-            0x00, 10,
-            0xFF, 20,
-            0x00, 30,
-            0xFF, 40};
-        if ((num_gpio_writes = write(ess_fd, gpio_sequence, sizeof(gpio_sequence))) >= 0) {
-            cout << "num_gpio_writes : " << num_gpio_writes << endl;
-        } else {
-            cout << "write() failure : " << num_gpio_writes << endl;
-        }
-
-        ioctl(ess_fd, ESS_SET_GPIO);
-        usleep(1000);
-        ioctl(ess_fd, ESS_CLR_GPIO);
-#endif
         process_key_entry(ess_fd);
 
         /* close module handle */

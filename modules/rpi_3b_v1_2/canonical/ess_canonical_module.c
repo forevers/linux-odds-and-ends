@@ -40,6 +40,7 @@
 #include <linux/poll.h>
 
 #include "ess_canonical_module.h"
+#include "util.h"
 
 MODULE_AUTHOR("Developer Name <developer_email>");
 MODULE_LICENSE("GPL");
@@ -72,41 +73,41 @@ MODULE_PARM_DESC(module_intarray, "parameter of int array type");
 /* log module parameters */
 static void log_parameters(void)
 {
-    pr_info("module_string: %s\n", module_string);
-    pr_info("module_int_val: %d\n", module_int_val);
-    pr_info("module_intarray: %d, %d\n", module_intarray[0], module_intarray[1]);
+    PR_INFO("module_string: %s", module_string);
+    PR_INFO("module_int_val: %d", module_int_val);
+    PR_INFO("module_intarray: %d, %d", module_intarray[0], module_intarray[1]);
 
     return;
 }
 
 int ess_open(struct inode *i, struct file *f)
 {
-    pr_info("ess_open()\n");
+    PR_INFO("entry");
     return 0;
 }
 
 int ess_close(struct inode *i, struct file *f)
 {
-    pr_info("ess_close()\n");
+    PR_INFO("entry()");
     return 0;
 }
 
 ssize_t ess_read(struct file *f, char __user *buff, size_t count, loff_t *pos)
 {
-    pr_info("ess_read()\n");
+    PR_INFO("entry()");
     return gpio_irq_demo_read(f, buff, count, pos);
 }
 
 ssize_t ess_write(struct file *f, const char __user *buff, size_t count, loff_t *pos)
 {
-    pr_info("ess_write()\n");
+    PR_INFO("entry()");
     return gpio_irq_demo_write(f, buff, count, pos);
 }
 
 #if defined(HAVE_UNLOCKED_IOCTL)
 static long ess_unlocked_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
-    pr_info("ess_unlocked_ioctl()\n");
+    PR_INFO("entry");
     return gpio_irq_demo_ioctl(f, cmd, arg);
 }
 #else
@@ -119,7 +120,7 @@ static int ess_ioctl(struct inode *i, struct file *f, unsigned int cmd, unsigned
 #if defined(HAVE_COMPAT_IOCTL)
 static long ess_compat_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
-    pr_info("ess_compat_ioctl()\n");
+    PR_INFO("entry");
     return 0;
 }
 #endif
@@ -127,7 +128,7 @@ static long ess_compat_ioctl(struct file *f, unsigned int cmd, unsigned long arg
 /* support for select(), poll() and epoll() system calls */
 __poll_t ess_poll(struct file *f, struct poll_table_struct *wait)
 {
-    pr_info("ess_poll()\n");
+    PR_INFO("entry");
     return gpio_irq_demo_poll(f, wait);
 }
 
@@ -160,7 +161,7 @@ canonical_init(void)
     int ret;
     int major;
 
-    pr_info("canonical_init() entry\n");
+    PR_INFO("entry");
 
 // TODO handle rets
     log_parameters();
@@ -170,13 +171,13 @@ canonical_init(void)
     gpio_irq_demo_init();
 
     if (0 > (ret = alloc_chrdev_region(&ess_dev_no, FIRST_REQUESTED_MINOR, NUM_DEVICES, "ess_region"))) {
-        pr_err("alloc_chrdev_region() failure\n");
+        PR_ERR("alloc_chrdev_region() failure");
         return ret;
     }
 
     /* request /sys/class entry */
     if (NULL == (ess_class = class_create(THIS_MODULE, "ess_class"))) {
-        pr_err("class_create() failure\n");
+        PR_ERR("class_create() failure");
         return -1;
     }
 
@@ -198,9 +199,8 @@ canonical_init(void)
     }
 
     major = MAJOR(ess_dev_no);
-    pr_info("major number : %d", major);
+    PR_INFO("major number : %d", major);
 
-    pr_info("canonical_init() exit\n");
     return 0;
 }
 
@@ -209,17 +209,15 @@ canonical_init(void)
 static void __exit
 canonical_exit(void)
 {
-    pr_info("canonical_exit() entry\n");
+    PR_INFO("entry");
 
     gpio_irq_exit();
 
     /* driver teardown */
-    pr_info("release driver resources\n");
+    PR_INFO("release driver resources");
     device_destroy(ess_class, ess_dev_no);
     class_destroy(ess_class);
     unregister_chrdev_region(ess_dev_no, NUM_DEVICES);
-
-    pr_info("canonical_exit() exit\n");
 }
 
 
