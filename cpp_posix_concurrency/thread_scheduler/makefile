@@ -5,7 +5,6 @@ PRODUCT := scheduler_demo
 
 CC := g++
 
-C_INCLUDES = `pkg-config --cflags-only-I libusb-1.0`
 PTHREAD =-pthread
 CFLAGS := 
 CPPFLAGS := $(DEBUG) $(OPT) $(WARN) $(PTHREAD) -g -O0 -std=c++17

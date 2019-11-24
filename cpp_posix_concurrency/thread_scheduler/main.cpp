@@ -160,7 +160,6 @@ void thread_1_handler(std::string name)
 int main() 
 {
     std::thread thread_1(thread_1_handler, "thread_1");
-    // thread thread_2(thread_2_handler, "thread_2");
 
     /* For processes scheduled under one of the normal scheduling policies (SCHED_OTHER, SCHED_IDLE, SCHED_BATCH),
        sched_priority is not used in scheduling decisions (it must be specified as 0).
