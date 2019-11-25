@@ -1,8 +1,8 @@
 // compiler options
-// $ g++ -g -O0 -std=c++17 -I../util -pthread -ggdb -lpthread main.cpp ../util/LinuxThread.cpp ../util/SyncLog.cpp -o ownership_demo
-// $ clang++ -g -O0 -std=c++17 -pthread -lpthread main.cpp ../util/LinuxThread.cpp ../util/SyncLog.cpp -o ownership_demo
+// $ g++ -g -O0 -std=c++17 -I../util -pthread -ggdb -lpthread main.cpp ../util/LinuxThread.cpp ../util/SyncLog.cpp -o allocation_demo
+// $ clang++ -g -O0 -std=c++17 -pthread -lpthread main.cpp ../util/LinuxThread.cpp ../util/SyncLog.cpp -o allocation_demo
 
-// simple demo of thread ownership transfer
+// simple demo of thread collection construct destruct
 
 #include "LinuxThread.h"
 
@@ -13,6 +13,7 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <vector>
 
 
 void thread_handler(std::string name)
@@ -34,10 +35,9 @@ void thread_handler(std::string name)
             int priority = getpriority(PRIO_PROCESS, tid);
 
             SyncLog::GetLog()->Log("thread " + name + ", id = " + std::to_string(tid) + ", priority = " + std::to_string(priority)
-                + ", policy = " + std::string(((policy == SCHED_FIFO)  ? "SCHED_FIFO" :
-                    (policy == SCHED_RR)    ? "SCHED_RR" :
-                    (policy == SCHED_OTHER) ? "SCHED_OTHER" :
-                    "???")));
+                + ", policy = " + std::string(((policy == SCHED_OTHER)  ? "SCHED_OTHER" :
+                    (policy == SCHED_BATCH) ? "SCHED_RR" :
+                    "SCHED_IDLE")));
         } else {
 
             std::stringstream ss;
@@ -58,16 +58,17 @@ void thread_handler(std::string name)
 int main() 
 {
     // number of concurrenty threads platform supports ( $ cat /proc/cpuinfo )
-    std::cout << "hardware concurrency : " << std::thread::hardware_concurrency() << std::endl;
+    auto num_cores = std::thread::hardware_concurrency();
 
-    LinuxThread thread_1(thread_handler, "thread_1");
+    std::cout << "hardware_concurrency() : " << num_cores << std::endl;
 
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    std::vector<LinuxThread> linux_threads;
+    for (int idx = 0; idx < num_cores; idx++) {
+        // uses move constructor
+        linux_threads.push_back(LinuxThread(thread_handler, "thread_" + std::to_string(idx), SCHED_OTHER, idx));
+    }
 
-    LinuxThread thread_2 = std::move(thread_1);
-
-    if (thread_1.Joinable()) thread_1.Join();
-    if (thread_2.Joinable()) thread_2.Join();
+    for (auto& thread_elem : linux_threads) thread_elem.Join();
 
     return 0;
 }
