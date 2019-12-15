@@ -15,6 +15,8 @@
 
 std::pair<int, int>  async_function(int instance_number, int num_stages)
 {
+    if (0 == num_stages) return std::make_pair(instance_number, 0);
+
     int run_count{0};
     bool running{true};
     int accum{0};
@@ -25,18 +27,20 @@ std::pair<int, int>  async_function(int instance_number, int num_stages)
 
         SyncLog::GetLog()->Log(std::to_string(instance_number) + ": async_function pass : " + std::to_string(run_count));
         std::this_thread::sleep_for(std::chrono::seconds(1));
-        if (num_stages == run_count++) running = false;
+        if (num_stages == ++run_count) running = false;
     }
+
+    SyncLog::GetLog()->Log("async_function() exiting");
 
     return std::make_pair(instance_number, accum);
 }
 
 
-void other_routine()
+void other_routine(int seconds_delay)
 {
     static int count{0};
     SyncLog::GetLog()->Log("other_routine() call : " + std::to_string(count++));
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    std::this_thread::sleep_for(std::chrono::seconds(seconds_delay));
 }
 
 
@@ -49,9 +53,9 @@ int main()
         std::future<std::pair<int,int>> future_accum = std::async(async_function, 0, 5);
 
         // run some other routines ...
-        other_routine();
+        other_routine(1);
 
-        // blocking get future call
+        // in time blocking get future call
         auto future_val = future_accum.get();
         std::cout << std::to_string(future_val.first) << ": future value : " << std::to_string(future_val.second) << std::endl;
     }
