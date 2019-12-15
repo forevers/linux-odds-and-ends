@@ -33,7 +33,6 @@
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/init.h>
-// #include <sys/ioctl.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -48,7 +47,6 @@ MODULE_DESCRIPTION("a canonical driver template");
 MODULE_VERSION("0.1");
 
 #include "gpio_irq.h"
-#include "container_of.h"
 
 /* driver parameters */
 #define NUM_DEVICES             1
@@ -165,8 +163,6 @@ canonical_init(void)
 
 // TODO handle rets
     log_parameters();
-
-    container_demo();
 
     gpio_irq_demo_init();
 
