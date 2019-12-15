@@ -53,16 +53,12 @@ $ sudo make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=<media 
 # LKM module build
 ## cross compile
 - simple Makefile for module construction
-    - $ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -C <path to cross compiled kernel>/linux M=$(pwd) modules
+    - $ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -C \<path to cross compiled kernel>/linux M=$(pwd) modules
 - inspect resultant module
-    - $ <path to rpi_tools>/arm-bcm2708/arm-linux-gnueabihf/bin/arm-linux-gnueabihf-objdump ess_canonical.ko -d -j .modinfo
+    - $ \<path to rpi_tools>/arm-bcm2708/arm-linux-gnueabihf/bin/arm-linux-gnueabihf-objdump ess_canonical.ko -d -j .modinfo
  vermagic=4.19.58-v7+
-- scp ko to target and test 
-    - sudo insmod <module name>.ko
-    - sudo rmmod <module name>
-    - dmesg
 
-# target configuration
+# transfer x-compiled modules to target
 - SSH between host and target
     - $ ifconfig // note target inet address
     - $ ping <inet address> // from host
@@ -72,8 +68,14 @@ $ sudo make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=<media 
         - $ ssh pi@<inet address> // prompted for host pwd
 - SCP from host and target
     - Copy file from local host to a remote host SCP example:
-        -$ scp < module name >.ko pi@< ip addr >:/home/pi/<target dir>
+        -$ scp \<module name>.ko pi@\<ip addr>:/home/pi/<target dir>
+    
+# test
+- load, test, unload module
+    - sudo insmod \<module name>.o
+    - dmesg -wH in separate shell
+    - execute test
+    - sudo rmmod \<module name>
 
 ## Supported Devices
-
 - rpi 3 B v1.2
