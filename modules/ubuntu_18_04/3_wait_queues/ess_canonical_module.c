@@ -9,8 +9,8 @@
     $ dmesg -wH
 
     load syntax :
-        $ sudo insmod ess_linked_list.ko
-        $ sudo insmod ess_linked_list.ko module_string="test" module_int_val=5 module_intarray=5,10
+        $ sudo insmod ess_wait_queues.ko
+        $ sudo insmod ess_wait_queues.ko module_string="test" module_int_val=5 module_intarray=5,10
         // verify rw access
         $ ls -l /dev/ess-device-name
             crw-rw-rw- 1 root root 240, 0 Sep 23 19:57 /dev/ess-device-name
@@ -26,17 +26,17 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/moduleparam.h>
+// #include <linux/moduleparam.h>
 
 #include "ess_canonical_module.h"
-#include "util.h"
+#include "../utils/util.h"
 
 MODULE_AUTHOR("Developer Name <developer_email>");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("a canonical driver template");
 MODULE_VERSION("0.1");
 
-#include "linked_list.h"
+#include "wait_queues.h"
 
 /* driver parameters */
 #define NUM_DEVICES             1
@@ -46,27 +46,6 @@ static struct class* ess_class;
 static struct cdev ess_cdev;
 static dev_t ess_dev_no;
 
-/* default module parameters */
-static char* module_string = "default module string";
-static int module_int_val = 2;
-static int module_intarray[2] = {0, 1};
-module_param(module_string, charp, S_IRUGO); // read
-MODULE_PARM_DESC(module_string, "parameter of string type");
-module_param(module_int_val, int, S_IRUGO); // read
-MODULE_PARM_DESC(module_int_val, "parameter of int type");
-module_param_array(module_intarray, int, NULL, S_IWUSR|S_IRUSR); // read/write
-MODULE_PARM_DESC(module_intarray, "parameter of int array type");
-
-
-/* log module parameters */
-static void log_parameters(void)
-{
-    PR_INFO("module_string: %s", module_string);
-    PR_INFO("module_int_val: %d", module_int_val);
-    PR_INFO("module_intarray: %d, %d", module_intarray[0], module_intarray[1]);
-
-    return;
-}
 
 int ess_open(struct inode *i, struct file *f)
 {
@@ -74,11 +53,13 @@ int ess_open(struct inode *i, struct file *f)
     return 0;
 }
 
+
 int ess_close(struct inode *i, struct file *f)
 {
     PR_INFO("entry()");
     return 0;
 }
+
 
 // see include/linux/fs.h for full fops description
 static struct file_operations ess_fops =
@@ -87,6 +68,7 @@ static struct file_operations ess_fops =
   .open = ess_open,
   .release = ess_close,
 };
+
 
 /* module load 
     for built-ins this code is placed in a mem section which is freed after init is complete
@@ -99,9 +81,7 @@ canonical_init(void)
 
     PR_INFO("entry");
 
-    log_parameters();
-
-    linked_list_demo();
+    wait_queues_demo();
 
     if (0 > (ret = alloc_chrdev_region(&ess_dev_no, FIRST_REQUESTED_MINOR, NUM_DEVICES, "ess_region"))) {
         PR_ERR("alloc_chrdev_region() failure");
