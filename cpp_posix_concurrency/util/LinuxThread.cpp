@@ -16,18 +16,28 @@
 #include <unistd.h>
 
 
-LinuxThread::LinuxThread(std::function<void()> func) :
+LinuxThread::LinuxThread(std::function<void()> func, unsigned int affinity) :
     thread_(func)
 {
 }
 
 
-LinuxThread::LinuxThread(std::function<void(std::string)> func, std::string name) :
+LinuxThread::LinuxThread(std::function<void(std::string)> func, std::string name, unsigned int affinity) :
     name_(name),
     thread_(func, name)
 {
     sched_param scheduler;
     int policy; 
+
+    if (affinity >= 0) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(affinity, &cpuset);
+        int rc = pthread_setaffinity_np(thread_.native_handle(), sizeof(cpu_set_t), &cpuset);
+        if (rc != 0) {
+            SyncLog::GetLog()->Log("Error calling pthread_setaffinity_np: " + std::to_string(rc));
+        }
+    }
 
     pthread_getschedparam(thread_.native_handle(), &policy, &scheduler);
     if (SCHED_OTHER == policy || SCHED_BATCH == policy || SCHED_IDLE == policy) {
@@ -39,12 +49,22 @@ LinuxThread::LinuxThread(std::function<void(std::string)> func, std::string name
 }
 
 
-LinuxThread::LinuxThread(std::function<void(std::string)> func, std::string name, int policy, int priority) :
+LinuxThread::LinuxThread(std::function<void(std::string)> func, std::string name, int policy, int priority, unsigned int affinity) :
     name_(name),
     thread_(func, name)
 {
     sched_param scheduler;
     int current_policy; 
+
+    if (affinity >= 0) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(affinity, &cpuset);
+        int rc = pthread_setaffinity_np(thread_.native_handle(), sizeof(cpu_set_t), &cpuset);
+        if (rc != 0) {
+            SyncLog::GetLog()->Log("Error calling pthread_setaffinity_np: " + std::to_string(rc));
+        }
+    }
 
     pthread_getschedparam(thread_.native_handle(), &current_policy, &scheduler);
     if (SCHED_OTHER == policy || SCHED_BATCH == policy || SCHED_IDLE == policy) {
@@ -102,7 +122,7 @@ bool LinuxThread::Joinable()
 }
 
 
-bool LinuxThread::Join()
+void LinuxThread::Join()
 {
     thread_.join();
 }

@@ -1,3 +1,11 @@
+
+# linux modules
+*.ko
+*.o.cmd
+modules.order
+*.mod.c
+Module.symvers
+
 # Prerequisites
 *.d
 
