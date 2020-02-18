@@ -5,6 +5,7 @@
 modules.order
 *.mod.c
 Module.symvers
+*.ko.cmd
 
 # Prerequisites
 *.d
