@@ -1,0 +1,11 @@
+# module name not a source file for multi-file builds
+obj-m := ess_cmwq.o
+# one of these files contains the module MACRO credentials
+ess_cmwq-objs := ess_canonical_module.o cmwq.o
+
+all:
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+
+clean:
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+

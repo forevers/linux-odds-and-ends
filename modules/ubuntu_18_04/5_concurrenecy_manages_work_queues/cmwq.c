@@ -7,11 +7,11 @@
 #include <linux/smp.h> 
 #include <linux/workqueue.h>
 
+#include <linux/random.h>
+
 #include "../utils/util.h"
 
 /* references
-https://lwn.net/Articles/11360/
-https://lwn.net/Articles/211279/
 https://www.kernel.org/doc/html/v4.14/core-api/workqueue.html
 */
 
@@ -69,15 +69,17 @@ static void do_work_delayed(struct work_struct* work_arg)
 }
 
 /* module init */
-void workqueues_init(void)
+void cmwq_init(void)
 {
     int i;
     int num_cores = num_online_cpus();
+    int max_active = prandom_u32_max(16);
 
     PR_INFO("entry");
     PR_INFO("%d cpus", num_cores);
+    PR_INFO("create cmwq with max_active threads: %d", max_active);
 
-    workqueue_ = create_singlethread_workqueue("single_threaded_work_queue");
+    workqueue_ = alloc_workqueue("cmwq_work_queue", WQ_MEM_RECLAIM, max_active);
 
     data_  = kmalloc(sizeof(struct Data), GFP_KERNEL);
     data_->value = 0;
@@ -95,7 +97,7 @@ void workqueues_init(void)
 }
 
 /* module exit */
-void workqueues_exit(void)
+void cmwq_exit(void)
 {
     struct list_head* safe_iter_temp;
     struct list_head* safe_iter_pos;
@@ -117,13 +119,13 @@ void workqueues_exit(void)
 }
 
 
-void workqueues_open(void)
+void cmwq_open(void)
 {
     PR_INFO("entry");
 }
 
 
-void workqueues_close(void)
+void cmwq_close(void)
 {
     PR_INFO("entry");
 }
