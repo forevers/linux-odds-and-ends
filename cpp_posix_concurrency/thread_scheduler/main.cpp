@@ -1,6 +1,6 @@
 // compiler options
 // $ g++ -g -O0 -std=c++17 -pthread -ggdb -lpthread -o scheduler_demo main.cpp
-// $ clang++ -g -O0 -std=c++17 -pthread -lpthread -o main.cpp
+// $ clang++ -g -O0 -std=c++17 -pthread -lpthread main.cpp -o scheduler_demo
 
 // simple demo of CFS and realtime linux threading
 
@@ -22,6 +22,8 @@
 #include <thread>
 #include <unistd.h>
 
+using namespace std;
+
 
 static std::mutex log_mtx_;
 
@@ -30,6 +32,15 @@ void log(std::string msg)
     std::lock_guard<std::mutex> lck (log_mtx_);
     std::cout << msg << std::endl;
 }
+
+
+// $ chrt -m
+// SCHED_OTHER min/max priority    : 0/0
+// SCHED_FIFO min/max priority     : 1/99
+// SCHED_RR min/max priority       : 1/99
+// SCHED_BATCH min/max priority    : 0/0
+// SCHED_IDLE min/max priority     : 0/0
+// SCHED_DEADLINE min/max priority : 0/0
 
 
 class LinuxThread
@@ -48,14 +59,14 @@ public:
     {}
 
     // Parameterized Constructor
-    LinuxThread(std::function<void(std::string)> func, std::string name, int policy, int priority) :
+    LinuxThread(std::function<void(std::string, int, int)> func, std::string name, int policy, int priority) :
         name_(name),
-        thread_(func, name)
+        thread_(func, name, policy, priority)
     {
-        sched_param scheduler;
+        sched_param scheduler_params;
         int current_policy; 
 
-        pthread_getschedparam(thread_.native_handle(), &current_policy, &scheduler);
+        pthread_getschedparam(thread_.native_handle(), &current_policy, &scheduler_params);
         if (SCHED_OTHER == policy || SCHED_BATCH == policy || SCHED_IDLE == policy) {
 
             log("policy[CFS] : " + std::string(((SCHED_OTHER == policy) ? "SCHED_OTHER" :
@@ -70,8 +81,8 @@ public:
 
         } else {
 
-            scheduler.sched_priority = priority;
-            if (0 == pthread_setschedparam(thread_.native_handle(), policy, &scheduler)) {
+            scheduler_params.sched_priority = priority;
+            if (0 == pthread_setschedparam(thread_.native_handle(), policy, &scheduler_params)) {
                 log("policy[REALTIME] : " + std::string(((policy == SCHED_FIFO)  ? "SCHED_FIFO" :
                    (policy == SCHED_RR)    ? "SCHED_RR" :
                    "SCHED_OTHER")));
@@ -105,7 +116,7 @@ public:
         return thread_.joinable();
     }
 
-    bool join()
+    void join()
     {
         thread_.join();
     }
@@ -117,34 +128,68 @@ private:
 };
 
 
-void thread_1_handler(std::string name)
+void thread_1_handler(std::string name, int policy, int priority)
 {
+    sched_param scheduler_params;
+    int current_policy; 
+
+    pthread_getschedparam(pthread_self(), &current_policy, &scheduler_params);
+    if (SCHED_OTHER == policy || SCHED_BATCH == policy || SCHED_IDLE == policy) {
+
+        log("policy[CFS] : " + std::string(((SCHED_OTHER == policy) ? "SCHED_OTHER" :
+            (SCHED_BATCH == policy) ? "SCHED_BATCH" :
+                "SCHED_IDLE")));
+
+        pid_t tid;
+        tid = syscall(SYS_gettid);
+        if (-1 == setpriority(PRIO_PROCESS, tid, priority)) {
+            log("setpriority() failure");
+        }
+
+    } else {
+
+        scheduler_params.sched_priority = priority;
+        if (0 == pthread_setschedparam(pthread_self(), policy, &scheduler_params)) {
+            log("policy[REALTIME] : " + std::string(((policy == SCHED_FIFO)  ? "SCHED_FIFO" :
+                (policy == SCHED_RR)    ? "SCHED_RR" :
+                "SCHED_OTHER")));
+        } else {
+            std::cerr << "Failed to set Thread scheduling : " << std::strerror(errno) << std::endl;
+        }
+    }
+
+
     int run_count{0};
     bool running{true};
 
-    sched_param sch;
-    int policy; 
+    // sched_param sch;
+    // int policy; 
 
     while (running) {
 
-        pthread_getschedparam(pthread_self(), &policy, &sch);
+        pthread_attr_t attr;
+        //pthread_getschedparam(pthread_self(), &current_policy, &sch);
+        // pthread_attr_getschedpolicy(&attr, &current_policy);
+        pthread_getschedparam(pthread_self(), &current_policy, &scheduler_params);
 
-        if (SCHED_OTHER == policy || SCHED_BATCH == policy || SCHED_IDLE == policy) {
+        if (SCHED_OTHER == current_policy || SCHED_BATCH == current_policy || SCHED_IDLE == current_policy) {
 
             pid_t tid;
             tid = syscall(SYS_gettid);
-            int priority = getpriority(PRIO_PROCESS, tid);
+            int nicness = getpriority(PRIO_PROCESS, tid);
 
-            log("thread " + name + ", id = " + std::to_string(tid) + ", priority = " + std::to_string(priority)
-                + ", policy = " + std::string(((policy == SCHED_FIFO)  ? "SCHED_FIFO" :
-                    (policy == SCHED_RR)    ? "SCHED_RR" :
-                    (policy == SCHED_OTHER) ? "SCHED_OTHER" :
+            log("thread " + name + ", id = " + std::to_string(tid) + ", niceness = " + std::to_string(nicness)
+                + ", policy = " + std::string(((current_policy == SCHED_OTHER)  ? "SCHED_OTHER" :
+                    (current_policy == SCHED_BATCH)    ? "SCHED_BATCH" :
+                    (current_policy == SCHED_IDLE) ? "SCHED_IDLE" :
                     "???")));
         } else {
 
+            // pthread_getschedparam(pthread_self(), &current_policy, &scheduler_params);
+
             std::stringstream ss;
             ss << std::this_thread::get_id();
-            log("thread " + name + ", id = " + ss.str() + ", priority = " + std::to_string(sch.sched_priority) 
+            log("thread " + name + ", id = " + ss.str() + ", priority = " + std::to_string(scheduler_params.sched_priority) 
                 + ", policy = " + std::string(((policy == SCHED_FIFO)  ? "SCHED_FIFO" :
                     (policy == SCHED_RR)    ? "SCHED_RR" :
                     (policy == SCHED_OTHER) ? "SCHED_OTHER" :
@@ -159,7 +204,13 @@ void thread_1_handler(std::string name)
 
 int main() 
 {
-    std::thread thread_1(thread_1_handler, "thread_1");
+    cout<<"SCHED_OTHER max priority : "<<sched_get_priority_max(SCHED_OTHER)<<endl;
+    cout<<"SCHED_BATCH max priority : "<<sched_get_priority_max(SCHED_BATCH)<<endl;
+    cout<<"SCHED_IDLE max priority : "<<sched_get_priority_max(SCHED_IDLE)<<endl;
+    cout<<"SCHED_IDLE max priority : "<<sched_get_priority_max(SCHED_FIFO)<<endl;
+    cout<<"SCHED_RR max priority : "<<sched_get_priority_max(SCHED_RR)<<endl;
+
+    thread thread_1(thread_1_handler, "thread_1", 0, 0);
 
     /* For processes scheduled under one of the normal scheduling policies (SCHED_OTHER, SCHED_IDLE, SCHED_BATCH),
        sched_priority is not used in scheduling decisions (it must be specified as 0).
