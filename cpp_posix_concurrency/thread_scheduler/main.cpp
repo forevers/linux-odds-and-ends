@@ -12,10 +12,12 @@
 // @group - rtprio 65
 
 #include <cstring>
+#include <errno.h>
 #include <functional>
 #include <iostream>
 #include <mutex>
 #include <sstream>
+#include <string.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -32,15 +34,6 @@ void log(std::string msg)
     std::lock_guard<std::mutex> lck (log_mtx_);
     std::cout << msg << std::endl;
 }
-
-
-// $ chrt -m
-// SCHED_OTHER min/max priority    : 0/0
-// SCHED_FIFO min/max priority     : 1/99
-// SCHED_RR min/max priority       : 1/99
-// SCHED_BATCH min/max priority    : 0/0
-// SCHED_IDLE min/max priority     : 0/0
-// SCHED_DEADLINE min/max priority : 0/0
 
 
 class LinuxThread
@@ -134,20 +127,33 @@ void thread_1_handler(std::string name, int policy, int priority)
     int current_policy; 
 
     pthread_getschedparam(pthread_self(), &current_policy, &scheduler_params);
+
+    // configure priority/niceness
     if (SCHED_OTHER == policy || SCHED_BATCH == policy || SCHED_IDLE == policy) {
 
         log("policy[CFS] : " + std::string(((SCHED_OTHER == policy) ? "SCHED_OTHER" :
             (SCHED_BATCH == policy) ? "SCHED_BATCH" :
                 "SCHED_IDLE")));
 
+        /* set policy */
+        if (0 == pthread_setschedparam(pthread_self(), policy, &scheduler_params)) {
+            log("policy[REALTIME] : " + std::string(((policy == SCHED_FIFO)  ? "SCHED_FIFO" :
+                (policy == SCHED_RR)    ? "SCHED_RR" :
+                "SCHED_OTHER")));
+        } else {
+            std::cerr << "Failed to set Thread scheduling : " << std::strerror(errno) << std::endl;
+        }
+
         pid_t tid;
         tid = syscall(SYS_gettid);
+        /* set niceness */
         if (-1 == setpriority(PRIO_PROCESS, tid, priority)) {
             log("setpriority() failure");
         }
 
     } else {
 
+        /* set priority */
         scheduler_params.sched_priority = priority;
         if (0 == pthread_setschedparam(pthread_self(), policy, &scheduler_params)) {
             log("policy[REALTIME] : " + std::string(((policy == SCHED_FIFO)  ? "SCHED_FIFO" :
@@ -158,34 +164,25 @@ void thread_1_handler(std::string name, int policy, int priority)
         }
     }
 
-
     int run_count{0};
     bool running{true};
 
-    // sched_param sch;
-    // int policy; 
-
     while (running) {
 
-        pthread_attr_t attr;
-        //pthread_getschedparam(pthread_self(), &current_policy, &sch);
-        // pthread_attr_getschedpolicy(&attr, &current_policy);
         pthread_getschedparam(pthread_self(), &current_policy, &scheduler_params);
 
         if (SCHED_OTHER == current_policy || SCHED_BATCH == current_policy || SCHED_IDLE == current_policy) {
 
             pid_t tid;
             tid = syscall(SYS_gettid);
-            int nicness = getpriority(PRIO_PROCESS, tid);
+            int niceness = getpriority(PRIO_PROCESS, tid);
 
-            log("thread " + name + ", id = " + std::to_string(tid) + ", niceness = " + std::to_string(nicness)
+            log("thread " + name + ", id = " + std::to_string(tid) + ", niceness = " + std::to_string(niceness)
                 + ", policy = " + std::string(((current_policy == SCHED_OTHER)  ? "SCHED_OTHER" :
                     (current_policy == SCHED_BATCH)    ? "SCHED_BATCH" :
                     (current_policy == SCHED_IDLE) ? "SCHED_IDLE" :
                     "???")));
         } else {
-
-            // pthread_getschedparam(pthread_self(), &current_policy, &scheduler_params);
 
             std::stringstream ss;
             ss << std::this_thread::get_id();
@@ -213,7 +210,8 @@ int main()
     thread thread_1(thread_1_handler, "thread_1", 0, 0);
 
     /* For processes scheduled under one of the normal scheduling policies (SCHED_OTHER, SCHED_IDLE, SCHED_BATCH),
-       sched_priority is not used in scheduling decisions (it must be specified as 0).
+       sched_priority is not used in scheduling decisions (it must be specified as 0). Instead use setpriority()
+       to configure niceness level.
     */
 
     // SCHED_OTHER - the standard round-robin time-sharing policy;

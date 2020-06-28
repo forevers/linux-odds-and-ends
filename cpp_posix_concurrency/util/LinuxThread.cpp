@@ -1,6 +1,6 @@
 // compiler options
 // $ g++ -g -O0 -std=c++17 -pthread -ggdb -lpthread -o  ownership_demo main.cpp
-// $ clang++ -g -O0 -std=c++17 -pthread -lpthread -o main.cpp
+// $ clang++ -g -O0 -std=c++17 -pthread -lpthread main.cpp -o ownership_demo
 
 // simple demo of thread ownership transfer
 
@@ -8,12 +8,10 @@
 
 #include <cstring>
 #include <errno.h>
-// #include <functional>
-// #include <iostream>
-#include "SyncLog.h"
-
 #include <sys/syscall.h>
 #include <unistd.h>
+
+#include "SyncLog.h"
 
 
 LinuxThread::LinuxThread(std::function<void()> func, unsigned int affinity) :
@@ -21,9 +19,9 @@ LinuxThread::LinuxThread(std::function<void()> func, unsigned int affinity) :
 {
 }
 
-
 LinuxThread::LinuxThread(std::function<void(std::string)> func, std::string name, unsigned int affinity) :
     name_(name),
+    affinity_(affinity),
     thread_(func, name)
 {
     sched_param scheduler;
@@ -38,20 +36,12 @@ LinuxThread::LinuxThread(std::function<void(std::string)> func, std::string name
             SyncLog::GetLog()->Log("Error calling pthread_setaffinity_np: " + std::to_string(rc));
         }
     }
-
-    pthread_getschedparam(thread_.native_handle(), &policy, &scheduler);
-    if (SCHED_OTHER == policy || SCHED_BATCH == policy || SCHED_IDLE == policy) {
-
-        SyncLog::GetLog()->Log("policy[CFS] : " + std::string(((SCHED_OTHER == policy) ? "SCHED_OTHER" :
-            (SCHED_BATCH == policy) ? "SCHED_BATCH" :
-             "SCHED_IDLE")));
-    }
 }
 
 
-LinuxThread::LinuxThread(std::function<void(std::string)> func, std::string name, int policy, int priority, unsigned int affinity) :
+LinuxThread::LinuxThread(std::function<void(std::string, int, int)> func, std::string name, int policy, int priority, unsigned int affinity) :
     name_(name),
-    thread_(func, name)
+    thread_(func, name, policy, priority)
 {
     sched_param scheduler;
     int current_policy; 
@@ -63,31 +53,6 @@ LinuxThread::LinuxThread(std::function<void(std::string)> func, std::string name
         int rc = pthread_setaffinity_np(thread_.native_handle(), sizeof(cpu_set_t), &cpuset);
         if (rc != 0) {
             SyncLog::GetLog()->Log("Error calling pthread_setaffinity_np: " + std::to_string(rc));
-        }
-    }
-
-    pthread_getschedparam(thread_.native_handle(), &current_policy, &scheduler);
-    if (SCHED_OTHER == policy || SCHED_BATCH == policy || SCHED_IDLE == policy) {
-
-        SyncLog::GetLog()->Log("policy[CFS] : " + std::string(((SCHED_OTHER == policy) ? "SCHED_OTHER" :
-            (SCHED_BATCH == policy) ? "SCHED_BATCH" :
-             "SCHED_IDLE")));
-
-        pid_t tid;
-        tid = syscall(SYS_gettid);
-        if (-1 == setpriority(PRIO_PROCESS, tid, priority)) {
-            SyncLog::GetLog()->Log("setpriority() failure");
-        }
-
-    } else {
-
-        scheduler.sched_priority = priority;
-        if (0 == pthread_setschedparam(thread_.native_handle(), policy, &scheduler)) {
-            SyncLog::GetLog()->Log("policy[REALTIME] : " + std::string(((policy == SCHED_FIFO)  ? "SCHED_FIFO" :
-               (policy == SCHED_RR)    ? "SCHED_RR" :
-               "SCHED_OTHER")));
-        } else {
-            std::cerr << "Failed to set Thread scheduling : " << std::strerror(errno) << std::endl;
         }
     }
 }

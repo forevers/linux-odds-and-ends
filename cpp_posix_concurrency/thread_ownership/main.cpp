@@ -1,6 +1,6 @@
 // compiler options
 // $ g++ -g -O0 -std=c++17 -I../util -pthread -ggdb -lpthread main.cpp ../util/LinuxThread.cpp ../util/SyncLog.cpp -o ownership_demo
-// $ clang++ -g -O0 -std=c++17 -pthread -lpthread main.cpp ../util/LinuxThread.cpp ../util/SyncLog.cpp -o ownership_demo
+// $ clang++ -g -O0 -std=c++17 -I../util -pthread -lpthread main.cpp ../util/LinuxThread.cpp ../util/SyncLog.cpp -o ownership_demo
 
 // simple demo of thread ownership transfer
 

@@ -23,7 +23,7 @@ public:
     LinuxThread(std::function<void(std::string)> func, std::string name, unsigned int affinity = -1);
 
     // Parameterized Constructor
-    LinuxThread(std::function<void(std::string)> func, std::string name, int policy, int priority, unsigned int affinity = -1);
+    LinuxThread(std::function<void(std::string, int, int)> func, std::string name, int policy, int priority, unsigned int affinity = -1);
  
     // Move Constructor
     LinuxThread(LinuxThread && obj);
@@ -44,5 +44,7 @@ private:
 
     std::thread thread_;
     std::string name_;
+    int policy_;
+    int priority_;
     int affinity_;
 };
