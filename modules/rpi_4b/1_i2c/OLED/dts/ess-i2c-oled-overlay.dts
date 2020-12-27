@@ -1,0 +1,55 @@
+// OLED configuration
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2711";
+
+    fragment@0 {
+        // i2c1 aliased to i2c_arm
+        target = <&i2c_arm>;
+
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            status = "okay";
+
+            ess-oled@3c {
+                compatible = "ess,ess-oled";
+                status = "okay";
+                #address-cells = <1>;
+                #size-cells = <0>;
+                reg = <0x3c>;
+                height = <64>;
+                width = <128>;
+                page-offset = <0>;
+                prechargep2 = <15>;
+                // SSD1306 RST pin is driven by rpi bus vcc during board power-up
+                // SDD1305 VBAT/VDD/VCC/VLSS, and BS1/I2C_SDA (i2c selection) pins are driven by rpi bus vcc during board power-up
+                test_ref = <&test_label>;
+                test_label: test_subnode {
+                    dummy;
+                };
+            };
+
+            gpio_oled: gpio@41 {
+                //compatible = "nxp,pca9536";
+                //gpio-controller;
+                //#gpio-cells = <2>;
+                //reg = <0x41>;
+                //vcc-supply = <&sw2_reg>;
+                //status = "disabled";
+            };
+
+            // TODO gpio driver for rpi bcm instead of nxp ...
+            //gpio_oled: gpio@41 {
+            //    compatible = "nxp,pca9536";
+            //    gpio-controller;
+            //    #gpio-cells = <2>;
+            //    reg = <0x41>;
+            //    vcc-supply = <&sw2_reg>;
+            //    status = "disabled";
+            //};
+        };
+    };
+};
