@@ -22,7 +22,15 @@
             $ sudo raspi-gpio get
     
     echo privilege:
+        // cmd 0x01 : display disable
         sudo bash -c 'echo -n -e \\x01 > /dev/ess-oled'
+        // cmd 0x02 : display enable
+        sudo bash -c 'echo -n -e \\xae > /dev/ess-oled'
+        // cmd 0x05 : draw point at x, y
+        sudo bash -c 'echo -n -e \\x05\\x40\\x10 > /dev/ess-oled'
+        // cmd 0x06 : draw line at x, y
+        sudo bash -c 'echo -n -e \\x05\\x40\\x10 > /dev/ess-oled'
+
 
     dts overlay:
         compile
@@ -64,6 +72,39 @@ typedef struct ess_ssd1305_oled {
     struct i2c_client* client;
     struct ssd1305_data oled_data;
 } ess_ssd1305_oled;
+
+/* ioctl and write commands */
+/* 1 parameter commands */
+#define CMD_BLANK           0x01
+#define CMD_ENABLE          0x02
+#define CMD_FILL_BUFFER     0x03
+#define CMD_CLEAR_BUFFER    0x04
+
+/* 2 parameter commands */
+#define CMD_SET_PIXEL       0x05
+#define CMD_GET_PIXEL       0x06
+    #define PIXEL_X_IDX 0x01
+    #define PIXEL_Y_IDX 0x02
+
+/* 3 parameter commands */
+#define CMD_H_LINE          0x07
+#define CMD_V_LINE          0x08
+    #define LINE_X_IDX 0x01
+    #define LINE_Y_IDX 0x02
+    #define LINE_LEN_IDX 0x02
+
+/* 4 parameter commands */
+#define CMD_RECT_FILL       0x09
+#define CMD_RECT_CLEAR      0x0A
+    #define RECT_X_IDX 0x01
+    #define RECT_Y_IDX 0x02
+    #define RECT_WIDTH 0x03
+    #define RECT_HEIGHT 0x04
+
+    #define LINE_LEN_IDX 0x02
+
+static void rect(ess_ssd1305_oled* oled, __u8 x, __u8 y, __u8 width, __u8 height, __u8 color, __u8 fill);
+
 
 // from /linux/drivers/video/fbdev/ssd1307fb.c
 // Co=1, D/C#=0
@@ -162,7 +203,7 @@ static void fill(struct ess_ssd1305_oled* oled, __u8 color)
     int i;
     __u8 fill_value = 0x00;
 
-    PR_INFO("fill() entry");
+    PR_INFO("entry");
 
     if (color) fill_value = 0xFF;
 
@@ -173,7 +214,7 @@ static void fill(struct ess_ssd1305_oled* oled, __u8 color)
         oled->oled_data.buffer[i+1] = fill_value;
     }
 
-    PR_INFO("fill() exit");
+    PR_INFO("exit");
 }
 
 
@@ -518,7 +559,7 @@ static int ess_oled_probe(struct i2c_client* client, const struct i2c_device_id*
         return ret;
     }
 
-    msleep(2000);
+    msleep(1000);
 
     rect(ess_ssd1305_oled_, 10, 10, 20, 10, 1, 1);
     if ((ret = show(ess_ssd1305_oled_)) < 0) {
@@ -526,7 +567,7 @@ static int ess_oled_probe(struct i2c_client* client, const struct i2c_device_id*
         return ret;
     }
 
-    msleep(2000);
+    msleep(1000);
 
     hline(ess_ssd1305_oled_, 31, 11, 10, 1);
     if ((ret = show(ess_ssd1305_oled_)) < 0) {
@@ -534,7 +575,7 @@ static int ess_oled_probe(struct i2c_client* client, const struct i2c_device_id*
         return ret;
     }
 
-    msleep(2000);
+    msleep(1000);
 
     vline(ess_ssd1305_oled_, 31, 11, 10, 1);
     if ((ret = show(ess_ssd1305_oled_)) < 0) {
@@ -579,14 +620,16 @@ ssize_t ess_oled_read(struct file *f, char __user *buff, size_t count, loff_t *p
 /* fops write */
 ssize_t ess_oled_write(struct file *f, const char __user *buff, size_t count, loff_t *pos)
 {
-    __u8 fill_value;
-    __u8 data[2];
-    int valid_cmd;
     int ret;
-    PR_INFO("entry()");
-    
+    PR_INFO("entry");
+
+    PR_INFO("buff[0] = %x, count = %lx", buff[0], count);
+
+    // TODO return valid count and accum buffer prior to issuing commands
     /* single byte write are REG writes */
     if (count == 1) {
+
+        __u8 data[1];
 
         /* copy data from user space */
         if (copy_from_user(data, buff, 1)) {
@@ -594,42 +637,100 @@ ssize_t ess_oled_write(struct file *f, const char __user *buff, size_t count, lo
             return count;
         }
 
-        valid_cmd = 0;
         switch(buff[0]) {
-            case SET_DISP_OFF:
-            case SET_DISP_ON:
-                valid_cmd = 1;
+            case CMD_BLANK:
+                ret = write_cmd(ess_ssd1305_oled_->client, SET_DISP_OFF);
+                break;
+            case CMD_ENABLE:
+                ret = write_cmd(ess_ssd1305_oled_->client, SET_DISP_ON);
+                break;
+            case CMD_FILL_BUFFER:
+                /* fill and update the display */
+                fill(ess_ssd1305_oled_, 1);
+                if ((ret = show(ess_ssd1305_oled_)) < 0) {
+                    PR_ERR("show() failure, ret: %d", ret);
+                }
+                break;
+            case CMD_CLEAR_BUFFER:
+                /* fill and update the display */
+                fill(ess_ssd1305_oled_, 0);
+                if ((ret = show(ess_ssd1305_oled_)) < 0) {
+                    PR_ERR("show() failure, ret: %d", ret);
+                }
+                break;
         }
 
-        if (valid_cmd) {
-            PR_INFO("cmd write: %x", buff[0]);
+    } else if (count == 3) {
 
-            if ((ret = i2c_smbus_write_byte(ess_ssd1305_oled_->client, buff[0])) < 0) {
-                PR_ERR("i2c_smbus_write_byte() failure");
-            }
-            return count;
-        }
+        __u8 data[3];
 
-    } else if (count == 2) {
-        /* dual byte write are buffer fills */
-
-        /* copy from user space int0 buffer */
-        if (copy_from_user(&fill_value, buff, 1)) {
+        /* copy data from user space */
+        if (copy_from_user(data, buff, count)) {
             PR_ERR("copy_from_user() failed\n");
             return count;
         }
 
-        PR_INFO("fill oled buffer with %x, count: %ld", fill_value, count);
+        switch(buff[0]) {
+            case CMD_SET_PIXEL:
+                set_pixel(ess_ssd1305_oled_, buff[PIXEL_X_IDX], buff[PIXEL_Y_IDX], 1);
+                if ((ret = show(ess_ssd1305_oled_)) < 0) {
+                    PR_ERR("show() failure, ret: %d", ret);
+                }
+                break;
+        }
 
-        /* fill and update the display */
-        fill(ess_ssd1305_oled_, fill_value);
-        if ((ret = show(ess_ssd1305_oled_)) < 0) {
-            PR_ERR("show() failure, ret: %d", ret);
+    } else if (count == 4) {
+
+        __u8 data[4];
+
+        /* copy data from user space */
+        if (copy_from_user(data, buff, count)) {
+            PR_ERR("copy_from_user() failed\n");
             return count;
+        }
+
+        switch(buff[0]) {
+            case CMD_H_LINE:
+                hline(ess_ssd1305_oled_, buff[LINE_X_IDX], buff[LINE_Y_IDX], buff[LINE_LEN_IDX], 1);
+                if ((ret = show(ess_ssd1305_oled_)) < 0) {
+                    PR_ERR("show() failure, ret: %d", ret);
+                }
+                break;
+            case CMD_V_LINE:
+                vline(ess_ssd1305_oled_, buff[LINE_X_IDX], buff[LINE_Y_IDX], buff[LINE_LEN_IDX], 1);
+                if ((ret = show(ess_ssd1305_oled_)) < 0) {
+                    PR_ERR("show() failure, ret: %d", ret);
+                }
+                break;
+        }
+
+    } else if (count == 5) {
+
+        __u8 data[5];
+
+        /* copy data from user space */
+        if (copy_from_user(data, buff, count)) {
+            PR_ERR("copy_from_user() failed\n");
+            return count;
+        }
+
+        switch(buff[0]) {
+            case CMD_RECT_FILL:
+                rect(ess_ssd1305_oled_, buff[RECT_X_IDX], buff[RECT_Y_IDX], buff[RECT_WIDTH], buff[RECT_HEIGHT], 1, 1);
+                if ((ret = show(ess_ssd1305_oled_)) < 0) {
+                    PR_ERR("show() failure, ret: %d", ret);
+                }
+                break;
+            case CMD_RECT_CLEAR:
+                rect(ess_ssd1305_oled_, buff[RECT_X_IDX], buff[RECT_Y_IDX], buff[RECT_WIDTH], buff[RECT_HEIGHT], 0, 1);
+                if ((ret = show(ess_ssd1305_oled_)) < 0) {
+                    PR_ERR("show() failure, ret: %d", ret);
+                }
+                break;
         }
     }
 
-    PR_INFO("exit()");
+    PR_INFO("exit");
     return count;
 }
 

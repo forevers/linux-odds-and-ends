@@ -86,19 +86,21 @@ int ess_open(struct inode *i, struct file *f)
 
 int ess_close(struct inode *i, struct file *f)
 {
-    PR_INFO("entry()");
+    PR_INFO("entry");
     return 0;
 }
 
 ssize_t ess_read(struct file *f, char __user *buff, size_t count, loff_t *pos)
 {
-    PR_INFO("entry()");
+    PR_INFO("entry");
+    PR_INFO("exit");
     return ess_oled_read(f, buff, count, pos);
 }
 
 ssize_t ess_write(struct file *f, const char __user *buff, size_t count, loff_t *pos)
 {
-    PR_INFO("entry()");
+    PR_INFO("entry");
+    PR_INFO("exit");
     return ess_oled_write(f, buff, count, pos);
 }
 
@@ -128,6 +130,7 @@ static long ess_compat_ioctl(struct file *f, unsigned int cmd, unsigned long arg
 __poll_t ess_poll(struct file *f, struct poll_table_struct *wait)
 {
     PR_INFO("entry");
+    PR_INFO("exit");
     // return gpio_irq_demo_poll(f, wait);
     return 0;
 }
@@ -163,7 +166,7 @@ canonical_init(void)
 
     PR_INFO("entry");
 
-// TODO handle rets
+    // TODO handle rets
     log_parameters();
 
     // gpio_irq_demo_init();
