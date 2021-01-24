@@ -206,6 +206,7 @@
 ## cross compile 64 bit
 - simple Makefile for module construction
     - $ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -C \<path to cross compiled kernel>/linux M=$(pwd) modules
+    - $ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -C /mnt/data/projects/rpi/clones/linux M=$(pwd) modules
     - $ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -C \<path to cross compiled kernel>/linux M=$(pwd) clean
 
 # transfer x-compiled modules to target
@@ -218,7 +219,7 @@
         - $ ssh pi@<inet address> // prompted for host pwd
 - SCP from host and target
     - Copy file from local host to a remote host SCP example:
-        -$ scp \<module name>.ko pi@\<ip addr>:/home/pi/<target dir>
+        -$ scp ess_oled.ko.ko pi@<ip addr>:/home/pi/projects/oled/driver
     
 # test
 - load, test, unload module
@@ -226,6 +227,27 @@
     - dmesg -wH in separate shell
     - execute test
     - sudo rmmod \<module name>
+
+# cross compile app
+
+## rpi tools repo
+
+https://github.com/raspberrypi/tools
+TOOL_PREFIX points to x-compile binary tools
+environment configuration
+
+    ```
+    export TOOL_PREFIX=/mnt/data/projects/rpi/clones/tools/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/bin/arm-bcm2708hardfp-linux-gnueabi
+    export CXX=$TOOL_PREFIX-g++
+    export AR=$TOOL_PREFIX-ar
+    export RANLIB=$TOOL_PREFIX-ranlib
+    export CC=$TOOL_PREFIX-gcc
+    export LD=$TOOL_PREFIX-ld
+    export CCFLAGS="-march=armv4"
+    ```
+
+TODO: rfs portion of host xcompile env ... like https://github.com/ionutneicu/rpi-cross-scripts
+
 
 ## Supported Devices
 - rpi 4

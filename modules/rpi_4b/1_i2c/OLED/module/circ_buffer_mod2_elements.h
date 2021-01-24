@@ -6,12 +6,14 @@
 /* circular buffer with mod 2 num_elements */
 struct CircularBufferMod2 {
     void* buffer;
-    size_t element_size;            /* element size */
+    size_t element_size;            /* selement size */
     size_t capacity;                /* num of elements allocated */
     int64_t size;                   /* num elements */
     int64_t peak;                   /* peak element usage */
-    int64_t head;
-    int64_t tail;
+    // int64_t head;
+    // int64_t tail;
+    int head;
+    int tail;
 };
 
 int init(struct CircularBufferMod2* circular_buffer_mod2, size_t element_size, size_t num_elements);

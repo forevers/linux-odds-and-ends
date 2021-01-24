@@ -13,8 +13,11 @@
         # Rules for ess-device-name
         KERNEL=="ess-device-name", SUBSYSTEM=="ess_class", MODE="0666"
 
+    utils: 
     // target module log realtime monitoring
     $ dmesg -wH
+    // clear log
+    $ dmesg -c
 
     load syntax :
         $ sudo insmod ess_canonical.ko
@@ -99,8 +102,8 @@ ssize_t ess_read(struct file *f, char __user *buff, size_t count, loff_t *pos)
 
 ssize_t ess_write(struct file *f, const char __user *buff, size_t count, loff_t *pos)
 {
-    PR_INFO("entry");
-    PR_INFO("exit");
+    // PR_INFO("entry");
+    // PR_INFO("exit");
     return ess_oled_write(f, buff, count, pos);
 }
 
@@ -108,21 +111,22 @@ ssize_t ess_write(struct file *f, const char __user *buff, size_t count, loff_t 
 static long ess_unlocked_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
     PR_INFO("entry");
-    // return gpio_irq_demo_ioctl(f, cmd, arg);
+    return ess_oled_ioctl(f, cmd, arg);
     return 0;
 }
 #else
 static int ess_ioctl(struct inode *i, struct file *f, unsigned int cmd, unsigned long arg)
 {
-    return -ENOTTY;;
+    return -ENOTTY;
 }
 #endif
 
 #if defined(HAVE_COMPAT_IOCTL)
 static long ess_compat_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
-    PR_INFO("entry");
-    return 0;
+    // PR_INFO("entry");
+    // PR_INFO("exit");
+    return ess_oled_ioctl(f, cmd, arg);
 }
 #endif
 
@@ -155,6 +159,18 @@ static struct file_operations ess_fops =
     .poll = ess_poll
 };
 
+
+/* device node creation callback will modify node permissions
+     proper method is udev rule
+*/
+static char *devnode_cb(struct device *dev, umode_t *mode)
+{
+    if (mode)
+        *mode = 0666;   /* node permissions */
+    return NULL;        /* could override /dev name here */
+}
+
+
 /* module load 
     for built-ins this code is placed in a mem section which is freed after init is complete
 */
@@ -182,6 +198,8 @@ canonical_init(void)
         PR_ERR("class_create() failure");
         return -1;
     }
+    /* override device default node permissions */
+    ess_class->devnode = devnode_cb;
 
     /* device node */
     if (device_create(ess_class, NULL, ess_dev_no, NULL, ESS_DEVICE_NAME) == NULL) {

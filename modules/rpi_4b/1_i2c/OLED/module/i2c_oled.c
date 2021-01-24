@@ -31,7 +31,6 @@
         // cmd 0x06 : draw line at x, y
         sudo bash -c 'echo -n -e \\x05\\x40\\x10 > /dev/ess-oled'
 
-
     dts overlay:
         compile
             $ dtc -W no-unit_address_vs_reg -I dts -O dtb -o ess-i2c-oled.dtbo ess-i2c-oled-overlay.dts
@@ -47,6 +46,9 @@
         verify driver dts configured
             $ cat /proc/device-tree/soc/i2c@7e804000/ess-oled@3c/compatible
             ess,ess-oled
+        inspect device tree binary
+            $ fdtdump ess-i2c-oled.dtbo 
+
 */
 
 #include <linux/delay.h>
@@ -58,6 +60,8 @@
 #include <linux/platform_device.h>
 #include <linux/uaccess.h>          /* copy_(to,from)_user */
 
+#include "gpio_oled_irq.h"
+#include "i2c_oled_global.h"
 #include "util.h"
 
 
@@ -73,38 +77,7 @@ typedef struct ess_ssd1305_oled {
     struct ssd1305_data oled_data;
 } ess_ssd1305_oled;
 
-/* ioctl and write commands */
-/* 1 parameter commands */
-#define CMD_BLANK           0x01
-#define CMD_ENABLE          0x02
-#define CMD_FILL_BUFFER     0x03
-#define CMD_CLEAR_BUFFER    0x04
-
-/* 2 parameter commands */
-#define CMD_SET_PIXEL       0x05
-#define CMD_GET_PIXEL       0x06
-    #define PIXEL_X_IDX 0x01
-    #define PIXEL_Y_IDX 0x02
-
-/* 3 parameter commands */
-#define CMD_H_LINE          0x07
-#define CMD_V_LINE          0x08
-    #define LINE_X_IDX 0x01
-    #define LINE_Y_IDX 0x02
-    #define LINE_LEN_IDX 0x02
-
-/* 4 parameter commands */
-#define CMD_RECT_FILL       0x09
-#define CMD_RECT_CLEAR      0x0A
-    #define RECT_X_IDX 0x01
-    #define RECT_Y_IDX 0x02
-    #define RECT_WIDTH 0x03
-    #define RECT_HEIGHT 0x04
-
-    #define LINE_LEN_IDX 0x02
-
 static void rect(ess_ssd1305_oled* oled, __u8 x, __u8 y, __u8 width, __u8 height, __u8 color, __u8 fill);
-
 
 // from /linux/drivers/video/fbdev/ssd1307fb.c
 // Co=1, D/C#=0
@@ -284,7 +257,7 @@ static void fill_rect(ess_ssd1305_oled* oled, __u8 x, __u8 y, __u8 width, __u8 h
 }
 
 
-/* fill or clear a rectangle within the framdbuffer */
+/* fill or clear a rectangle within the frame buffer */
 static void rect(ess_ssd1305_oled* oled, __u8 x, __u8 y, __u8 width, __u8 height, __u8 color, __u8 fill)
 {
     /* Draw a rectangle at the given location, size and color.
@@ -412,13 +385,13 @@ static int ess_oled_probe(struct i2c_client* client, const struct i2c_device_id*
 
     /* smbus read/write byte and read word */
     if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA | I2C_FUNC_SMBUS_READ_WORD_DATA)) {
-        dev_err(&client->dev, "I2C_FUNC_SMBUS_BYTE_DATA | I2C_FUNC_SMBUS_READ_WORD_DATA check failed\n");
+        dev_err(&client->dev, "I2C_FUNC_SMBUS_BYTE_DATA | 32 check failed\n");
         return -EOPNOTSUPP;
     }
 
     /* oled device data */
     if ((ess_ssd1305_oled_ = kmalloc(sizeof(ess_ssd1305_oled), GFP_KERNEL))) {
-        ess_ssd1305_oled_->oled_data.height = 32; //TODO thought this was 64?;
+        ess_ssd1305_oled_->oled_data.height = 64;//32; //TODO thought this was 64?;
         ess_ssd1305_oled_->oled_data.pages = DIV_ROUND_UP(ess_ssd1305_oled_->oled_data.height, 8);
         ess_ssd1305_oled_->oled_data.width = 128;
         if (!(ess_ssd1305_oled_->oled_data.buffer = kzalloc((ess_ssd1305_oled_->oled_data.width * ess_ssd1305_oled_->oled_data.pages) + 1, GFP_KERNEL))) {
@@ -548,12 +521,12 @@ static int ess_oled_probe(struct i2c_client* client, const struct i2c_device_id*
         return ret;
     }
 
-    /* Set a pixel in the origin 0,0 position */
+    /* Set a pixel in the origin 0, 0 position */
     set_pixel(ess_ssd1305_oled_, 0, 0, 1);
-    /* Set a pixel in the middle 64, 16 position */
-    set_pixel(ess_ssd1305_oled_, 64, 16, 1);
-    /* Set a pixel in the opposite 127, 31 position */
-    set_pixel(ess_ssd1305_oled_, 127, 31, 1);
+    /* Set a pixel in the middle 64, 32 position */
+    set_pixel(ess_ssd1305_oled_, 64, 32, 1);
+    /* Set a pixel in the opposite 127, 63 position */
+    set_pixel(ess_ssd1305_oled_, 127, 63, 1);
     if ((ret = show(ess_ssd1305_oled_)) < 0) {
         PR_ERR("show() failure");
         return ret;
@@ -621,11 +594,10 @@ ssize_t ess_oled_read(struct file *f, char __user *buff, size_t count, loff_t *p
 ssize_t ess_oled_write(struct file *f, const char __user *buff, size_t count, loff_t *pos)
 {
     int ret;
-    PR_INFO("entry");
+    // PR_INFO("entry");
 
-    PR_INFO("buff[0] = %x, count = %lx", buff[0], count);
+    // PR_INFO("buff[0] = %x, count = %lx", buff[0], count);
 
-    // TODO return valid count and accum buffer prior to issuing commands
     /* single byte write are REG writes */
     if (count == 1) {
 
@@ -638,20 +610,20 @@ ssize_t ess_oled_write(struct file *f, const char __user *buff, size_t count, lo
         }
 
         switch(buff[0]) {
-            case CMD_BLANK:
+            case CMD_DISABLE_SEQ_NUM:
                 ret = write_cmd(ess_ssd1305_oled_->client, SET_DISP_OFF);
                 break;
-            case CMD_ENABLE:
+            case CMD_ENABLE_SEQ_NUM:
                 ret = write_cmd(ess_ssd1305_oled_->client, SET_DISP_ON);
                 break;
-            case CMD_FILL_BUFFER:
+            case CMD_FILL_BUFFER_SEQ_NUM:
                 /* fill and update the display */
                 fill(ess_ssd1305_oled_, 1);
                 if ((ret = show(ess_ssd1305_oled_)) < 0) {
                     PR_ERR("show() failure, ret: %d", ret);
                 }
                 break;
-            case CMD_CLEAR_BUFFER:
+            case CMD_CLEAR_BUFFER_SEQ_NUM:
                 /* fill and update the display */
                 fill(ess_ssd1305_oled_, 0);
                 if ((ret = show(ess_ssd1305_oled_)) < 0) {
@@ -688,6 +660,7 @@ ssize_t ess_oled_write(struct file *f, const char __user *buff, size_t count, lo
             PR_ERR("copy_from_user() failed\n");
             return count;
         }
+        PR_INFO("buff[0] = %d-%d-%d-%d , count = %lx", buff[0], buff[1], buff[2], buff[3], count);
 
         switch(buff[0]) {
             case CMD_H_LINE:
@@ -730,8 +703,57 @@ ssize_t ess_oled_write(struct file *f, const char __user *buff, size_t count, lo
         }
     }
 
-    PR_INFO("exit");
+    // PR_INFO("exit");
     return count;
+}
+
+
+long ess_oled_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
+{
+    long retval = 0;
+    int ret = 0;
+    PR_INFO("entry");
+    
+    PR_INFO("cmd: %x, arg: %lx", cmd, arg);
+
+    switch(cmd) {
+
+        case IOCTL_DISABLE:
+            if ((ret = write_cmd(ess_ssd1305_oled_->client, SET_DISP_OFF)) < 0) {
+                PR_ERR("SET_DISP_OFF ret: %d", ret);
+            }
+            break;
+        case IOCTL_ENABLE:
+            if ((ret = write_cmd(ess_ssd1305_oled_->client, SET_DISP_ON)) < 0) {
+                PR_ERR("SET_DISP_ON failure, ret: %d", ret);
+            }
+            break;
+        case IOCTL_FILL_BUFFER:
+            /* fill buffer and update the display */
+            fill(ess_ssd1305_oled_, 1);
+            if ((ret = show(ess_ssd1305_oled_)) < 0) {
+                PR_ERR("show() failure, ret: %d", ret);
+            }
+            break;
+        case IOCTL_CLEAR_BUFFER:
+            /* clear buffer and update the display */
+            fill(ess_ssd1305_oled_, 0);
+            if ((ret = show(ess_ssd1305_oled_)) < 0) {
+                PR_ERR("show() failure, ret: %d", ret);
+            }
+            break;
+        case IOCTL_RELEASE_POLL:
+            break;
+        default:
+
+            retval = -EPERM;
+            break;
+
+        return retval;
+    }
+
+    PR_INFO("exit");
+    return retval;
 }
 
 
@@ -752,10 +774,21 @@ static struct i2c_driver ess_oled_driver = {
 module_i2c_driver(ess_oled_driver);
 #else
 // static int __init ess_oled_init(void)
-int ess_oled_init(void)
+int ess_oled_init(void) 
 {
-    PR_INFO("ess_oled_init() entry");
-    return i2c_add_driver(&ess_oled_driver);
+    int ret;
+    PR_INFO("entry");
+
+    if ((ret = i2c_add_driver(&ess_oled_driver) == 0)) {
+        if ((ret = gpio_oled_irq_init() != 0)) {
+            PR_ERR("gpio_oled_irq_init() failure");
+        }
+    } else {
+        PR_ERR("i2c_add_driver() failure");
+    }
+
+    PR_INFO("exit");
+    return ret;
 }
 // module_init(ess_oled_init);
 // static void __exit ess_oled_cleanup(void)
@@ -763,6 +796,7 @@ void ess_oled_cleanup(void)
 {
     PR_INFO("ess_oled_cleanup() entry");
     i2c_del_driver(&ess_oled_driver);
+    gpio_oled_irq_exit();
 }
 // module_exit(ess_oled_cleanup);
 #endif
