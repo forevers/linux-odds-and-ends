@@ -2,7 +2,7 @@
 # module name not a source file for multi-file builds
 obj-m := ess_oled.o
 # one of these files contains the module MACRO credentials
-ess_oled-objs := ess_canonical_module.o i2c_oled.o gpio_oled_irq.o circ_buffer_mod2_elements.o
+ess_oled-objs := ess_canonical_module.o i2c_oled.o gpio_oled_irq.o circ_buffer_pow2_elements.o
 # CLAGS_ess_oled.o := -DDEBUG
 
 # # all:

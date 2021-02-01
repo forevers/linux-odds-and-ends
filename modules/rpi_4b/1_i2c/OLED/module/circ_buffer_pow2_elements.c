@@ -1,9 +1,10 @@
 #include <linux/circ_buf.h>
+#include <linux/log2.h>
 #include <linux/slab.h>
 #include <stddef.h>
 #include <stdbool.h>
 
-#include "circ_buffer_mod2_elements.h"
+#include "circ_buffer_pow2_elements.h"
 #include "util.h"
 
 /* 
@@ -11,15 +12,15 @@
     not thread safe
 */
 
-int init(struct CircularBufferMod2* circular_buffer_mod2, size_t element_size, size_t num_elements) 
+int init(struct CircularBufferPow2* circular_buffer_mod2, size_t element_size, size_t num_elements) 
 {
     int ret_val = 0;
 
     PR_INFO("entry");
     PR_INFO("element_size : %ld, num_elements : %ld", element_size, num_elements);
 
-    /* must be mod2 capacity */
-    if (num_elements % 2) return -1;
+    /* must be pow 2 capacity */
+    if ((num_elements == 0) || ((num_elements & (num_elements - 1)) != 0)) return -1;
 
     PR_INFO("kmalloc() pre, num_elements: %ld, element_size: %lu", num_elements, element_size);
     if (NULL != (circular_buffer_mod2->buffer = kmalloc(num_elements * element_size, GFP_KERNEL))) {
@@ -37,19 +38,19 @@ int init(struct CircularBufferMod2* circular_buffer_mod2, size_t element_size, s
     return ret_val;
 }
 
-void release(struct CircularBufferMod2* circular_buffer_mod2)
+void release(struct CircularBufferPow2* circular_buffer_mod2)
 {
     kfree(circular_buffer_mod2->buffer);
 }
 
-_Bool empty(struct CircularBufferMod2* buffer)
+_Bool empty(struct CircularBufferPow2* buffer)
 {
     PR_INFO("entry");
 
     return buffer->head == buffer->tail;
 }
 
-void clear(struct CircularBufferMod2* buffer)
+void clear(struct CircularBufferPow2* buffer)
 {
     PR_INFO("entry");
 
@@ -57,7 +58,7 @@ void clear(struct CircularBufferMod2* buffer)
     buffer->tail = 0;
 }
 
-size_t size(struct CircularBufferMod2* buffer)
+size_t size(struct CircularBufferPow2* buffer)
 {
     int head = READ_ONCE(buffer->head);
     int tail = READ_ONCE(buffer->tail);
@@ -66,7 +67,7 @@ size_t size(struct CircularBufferMod2* buffer)
     return (head - tail) & (buffer->capacity-1);
 }
 
-size_t space(struct CircularBufferMod2* buffer)
+size_t space(struct CircularBufferPow2* buffer)
 {
     int head = READ_ONCE(buffer->head);
     int tail = READ_ONCE(buffer->tail);
@@ -77,7 +78,7 @@ size_t space(struct CircularBufferMod2* buffer)
     return space;
 }
 
-size_t events_pending_to_end(struct CircularBufferMod2* buffer)
+size_t events_pending_to_end(struct CircularBufferPow2* buffer)
 {
 
     int64_t end = buffer->size - buffer->tail;
@@ -88,15 +89,16 @@ size_t events_pending_to_end(struct CircularBufferMod2* buffer)
     return num_events;
 }
 
-int push(struct CircularBufferMod2* buffer, void* element)
+int push(struct CircularBufferPow2* buffer, void* element)
 {
     int retval = 0;
     int head = READ_ONCE(buffer->head);
     int tail = READ_ONCE(buffer->tail);
-    size_t space = CIRC_SPACE(head, tail, buffer->capacity);
+    size_t space;
 
     PR_INFO("entry");
 
+    space = CIRC_SPACE(head, tail, buffer->capacity);
     if (space >= 1) {
         memcpy(buffer->buffer + head*(buffer->element_size), element, buffer->element_size);
         WRITE_ONCE(buffer->head, (head + 1) & (buffer->capacity - 1));
@@ -104,6 +106,7 @@ int push(struct CircularBufferMod2* buffer, void* element)
         // smp_store_release(buffer->head, (head + 1) & (buffer->size - 1));
         head = READ_ONCE(buffer->head);
         PR_INFO("capacity : %ld, head : %d, tail : %d", buffer->capacity, head, tail);
+        // PR_INFO("capacity : %ld, buffer->head : %d, buffer->tail : %d", buffer->capacity, buffer->head, buffer->tail);
     } else {
         retval = -1;
         PR_ERR("buffer is full, capacity : %ld, head : %d, tail : %d", buffer->capacity, head, tail);
@@ -112,7 +115,7 @@ int push(struct CircularBufferMod2* buffer, void* element)
     return retval;
 }
 
-void* front(struct CircularBufferMod2* buffer)
+void* front(struct CircularBufferPow2* buffer)
 {
     void* event = NULL;
     int tail = READ_ONCE(buffer->tail);
@@ -127,7 +130,7 @@ void* front(struct CircularBufferMod2* buffer)
     return event;
 }
 
-void pop(struct CircularBufferMod2* buffer)
+void pop(struct CircularBufferPow2* buffer)
 {
     int tail = READ_ONCE(buffer->tail);
 

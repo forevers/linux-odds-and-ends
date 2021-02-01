@@ -18,6 +18,11 @@
             /linux/Documentation/devicetree/bindings/display/ssd1307fb.txt
             /linux/drivers/video/fbdev/ssd1307fb.c
             /linux/drivers/staging/fbtft/fb_ssd1305.c
+        kernel memory barriers:
+            http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/n4444.html
+            https://lwn.net/Articles/718628/
+            https://lwn.net/Articles/720550/
+            https://mirrors.edge.kernel.org/pub/linux/kernel/people/paulmck/LWNLinuxMM/StrongModel.html
         gpio user space get:
             $ sudo raspi-gpio get
     

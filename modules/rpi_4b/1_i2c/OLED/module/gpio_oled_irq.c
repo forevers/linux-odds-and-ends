@@ -8,7 +8,7 @@
 #include <linux/wait.h>
 // #include <linux/workqueue.h>
 
-#include "circ_buffer_mod2_elements.h"
+#include "circ_buffer_pow2_elements.h"
 // #include "gpio_irq.h"
 // #include "gpio_irq_global.h"
 #include "util.h"
@@ -58,12 +58,12 @@ struct EventBulkData {
 // TODO create custom ess workqueue */
 struct ESSWorkStructWrapper {
     struct work_struct event_work_struct;
-    struct CircularBufferMod2 capture_event_buffer;     /* upper half irq data */
+    struct CircularBufferPow2 capture_event_buffer;     /* upper half irq data */
     spinlock_t capture_event_spinlock;                  /* capture_event_buffer shared between irq and workqueue (or tasklet TODO) */
     bool poll_enabled;                                  /* device supports polling */ 
     wait_queue_head_t capture_event_waitqueue;          /* irq lower half processing by workqueue (or tasklet TODO) */
     uint64_t event;                                     /* incrementing event number */
-    struct CircularBufferMod2 event_bulk_data_buffer;   /* lower half data */
+    struct CircularBufferPow2 event_bulk_data_buffer;   /* lower half data */
     struct mutex event_bulk_data_mtx;                   /* event_bulk_data_buffer access mutex */
 } ess_work_struct_wrapper_;
 
@@ -95,10 +95,10 @@ int gpio_oled_irq_init(void)
     PR_INFO("entry");
 
     /* gpio irq upper half buffer and lower half work queue */
-    if (0 == (result = init(&ess_work_struct_wrapper_.capture_event_buffer, sizeof(struct CaptureEvent), MAX_MOD_2_BUFFER_ELEMENTS(CaptureEvent)))) {
+    if (0 == (result = init(&ess_work_struct_wrapper_.capture_event_buffer, sizeof(struct CaptureEvent), 0x08))) {
         PR_INFO("init() success");
 
-        if (0 == (result = init(&ess_work_struct_wrapper_.event_bulk_data_buffer, sizeof(struct EventBulkData), MAX_MOD_2_BUFFER_ELEMENTS(EventBulkData)))) {
+        if (0 == (result = init(&ess_work_struct_wrapper_.event_bulk_data_buffer, sizeof(struct EventBulkData), 0x10))) {
             PR_INFO("init() success");
 
             ess_work_struct_wrapper_.event = 0;
@@ -425,7 +425,7 @@ __poll_t gpio_irq_oled_poll(struct file *f, struct poll_table_struct *wait)
 /* maintain a low overhead list of events between interrupt and work queue */
 static irq_handler_t gpio_irq_handler(unsigned int irq, void* dev_id, struct pt_regs* regs)
 {
-    struct CircularBufferMod2* capture_event_buffer = &ess_work_struct_wrapper_.capture_event_buffer;
+    struct CircularBufferPow2* capture_event_buffer = &ess_work_struct_wrapper_.capture_event_buffer;
 
     static uint64_t counter = 0;
 
@@ -467,8 +467,9 @@ static void do_work(struct work_struct* work)
     struct CaptureEvent capture_event;
     unsigned long flags;
     uint64_t idx;
+    static int test_entry = 0;
 
-    PR_INFO("entry");
+    PR_ERR("entry: %d", ++test_entry);
 
     spin_lock_irqsave(&ess_work_struct_wrapper_.capture_event_spinlock, flags);
     /* access capture_event_buffer */
