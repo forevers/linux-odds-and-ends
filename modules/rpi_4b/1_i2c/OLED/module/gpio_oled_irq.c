@@ -4,7 +4,6 @@
 #include <linux/interrupt.h>
 #include <linux/mutex.h>
 #include <linux/poll.h>
-// #include <linux/spinlock.h>
 #include <linux/wait.h>
 // #include <linux/workqueue.h>
 
@@ -59,7 +58,6 @@ struct EventBulkData {
 struct ESSWorkStructWrapper {
     struct work_struct event_work_struct;
     struct CircularBufferPow2 capture_event_buffer;     /* upper half irq data */
-    spinlock_t capture_event_spinlock;                  /* capture_event_buffer shared between irq and workqueue (or tasklet TODO) */
     bool poll_enabled;                                  /* device supports polling */ 
     wait_queue_head_t capture_event_waitqueue;          /* irq lower half processing by workqueue (or tasklet TODO) */
     uint64_t event;                                     /* incrementing event number */
@@ -108,7 +106,6 @@ int gpio_oled_irq_init(void)
             init_waitqueue_head(&ess_work_struct_wrapper_.capture_event_waitqueue);
 
             INIT_WORK(&ess_work_struct_wrapper_.event_work_struct, do_work);
-            spin_lock_init(&ess_work_struct_wrapper_.capture_event_spinlock);
 
             // sema_init(&(ess_work_struct_wrapper_->sem), 1);
             mutex_init(&ess_work_struct_wrapper_.event_bulk_data_mtx);
@@ -432,27 +429,18 @@ static irq_handler_t gpio_irq_handler(unsigned int irq, void* dev_id, struct pt_
     PR_INFO("entry");
     PR_INFO("num_irqs_ = %d", ++num_irqs_);
 
-    spin_lock(&ess_work_struct_wrapper_.capture_event_spinlock);
-    PR_INFO("capture_event_spinlock locked");
-
     /* access capture_event_buffer */
     // log rising edge and count
     {
         struct CaptureEvent capture_event;
         capture_event.rising = 1;
-        capture_event.event = counter++;
+        capture_event.event = ++counter;
         PR_INFO("pushing event %lld", capture_event.event);
         push(capture_event_buffer, &capture_event);
     }
 
     // TODO pass info in regs
     schedule_work(&ess_work_struct_wrapper_.event_work_struct);
-
-    spin_unlock(&ess_work_struct_wrapper_.capture_event_spinlock);
-    PR_INFO("capture_event_spinlock unlocked");
-
-    // // TODO pass info in regs
-    // schedule_work(&ess_work_struct_wrapper_.event_work_struct);
 
     return (irq_handler_t) IRQ_HANDLED;
 }
@@ -471,47 +459,39 @@ static void do_work(struct work_struct* work)
 
     PR_ERR("entry: %d", ++test_entry);
 
-    spin_lock_irqsave(&ess_work_struct_wrapper_.capture_event_spinlock, flags);
-    /* access capture_event_buffer */
-    // if (space(&ess_work_struct_wrapper_.capture_event_buffer)) {
-
-        if (NULL != (capture_event_ref = front(&ess_work_struct_wrapper_.capture_event_buffer))) {
-            /* copy event */
-            PR_INFO("element_size : %zd", ess_work_struct_wrapper_.capture_event_buffer.element_size);
-            memcpy(&capture_event, capture_event_ref, ess_work_struct_wrapper_.capture_event_buffer.element_size);
-            pop(&ess_work_struct_wrapper_.capture_event_buffer);
-            PR_INFO("capture_event : %s, %lld", (capture_event.rising == true) ? "rising" : "falling", capture_event.event);
-        } else {
-            PR_ERR("EMPTY!!!, element_size : %zd", ess_work_struct_wrapper_.capture_event_buffer.element_size);
-        }
-    // }
-    PR_INFO("capture_event_spinlock locked");
-    spin_unlock_irqrestore(&ess_work_struct_wrapper_.capture_event_spinlock, flags);
-    PR_INFO("capture_event_spinlock unlocked");
-
     ess_work_struct_wrapper = container_of(work, struct ESSWorkStructWrapper, event_work_struct);
 
-    /* access event_bulk_data_buffer, shared by poll and read() */
-    // TODO investigate interruptable version
-    mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
-    PR_INFO("event_bulk_data_mtx locked");
-    if (space(&ess_work_struct_wrapper_.event_bulk_data_buffer)) {
-        if (NULL != capture_event_ref) {
-            /* capture event obtained */
-            // TODO consider providing event_bulk_data memory directly from buffer vs filling stack first then pushing
-            struct EventBulkData event_bulk_data;
-            memcpy(&event_bulk_data.capture_event, &capture_event, sizeof(struct CaptureEvent));
-            for (idx = 0; idx < 10; idx++) {
-                event_bulk_data.bulk_data[idx] = capture_event.event + idx;
-            }
+    // TODO producer - consumer barrier model
+    /* access capture_event_buffer */
+    while (NULL != (capture_event_ref = front(&ess_work_struct_wrapper->capture_event_buffer))) {
+        /* copy event */
+        PR_INFO("element_size : %zd", ess_work_struct_wrapper->capture_event_buffer.element_size);
+        memcpy(&capture_event, capture_event_ref, ess_work_struct_wrapper->capture_event_buffer.element_size);
+        pop(&ess_work_struct_wrapper->capture_event_buffer);
+        PR_INFO("capture_event : %s, %lld", (capture_event.rising == true) ? "rising" : "falling", capture_event.event);
+    
+        /* access event_bulk_data_buffer, shared by poll and read() */
+        // TODO investigate interruptable version
+        mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
+        PR_INFO("event_bulk_data_mtx locked");
+        if (space(&ess_work_struct_wrapper_.event_bulk_data_buffer)) {
+            if (NULL != capture_event_ref) {
+                /* capture event obtained */
+                // TODO consider providing event_bulk_data memory directly from buffer vs filling stack first then pushing
+                struct EventBulkData event_bulk_data;
+                memcpy(&event_bulk_data.capture_event, &capture_event, sizeof(struct CaptureEvent));
+                for (idx = 0; idx < 10; idx++) {
+                    event_bulk_data.bulk_data[idx] = capture_event.event + idx;
+                }
 
-            if (0 == push(&ess_work_struct_wrapper_.event_bulk_data_buffer, &event_bulk_data)) {
-                /* signal the blocked poll (select(), poll() or epoll() sys call) */
-                PR_INFO("wake_up_interruptable()");
-                wake_up_interruptible(&(ess_work_struct_wrapper->capture_event_waitqueue));
+                if (0 == push(&ess_work_struct_wrapper_.event_bulk_data_buffer, &event_bulk_data)) {
+                    /* signal the blocked poll (select(), poll() or epoll() sys call) */
+                    PR_INFO("wake_up_interruptable()");
+                    wake_up_interruptible(&(ess_work_struct_wrapper->capture_event_waitqueue));
+                }
             }
         }
+        mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
+        PR_INFO("event_bulk_data_mtx unlocked");
     }
-    mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
-    PR_INFO("event_bulk_data_mtx unlocked");
 }
