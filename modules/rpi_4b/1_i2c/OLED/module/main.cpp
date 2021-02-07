@@ -30,24 +30,17 @@ using namespace::std;
 class ButtonProcessing
 {
 public:
-    // /* polling mode to test */
-    // enum class PollMode {
-    //     SELECT,
-    //     POLL,
-    //     EPOLL
-    // };
 
     bool oled_enabled_;
     bool oled_filled_;
     bool oled_rect_filled_;
 
     ButtonProcessing(std::string name, int fd, uint8_t x_cur = 0, uint8_t y_cur = 0) :
-        // poll_mode_(poll_mode),
         thread_(&ButtonProcessing::Run, this, name),
         name_(name),
         fd_(fd),
-        // ep_fd_(-1),
-        // epoll_initialized_(false),
+        ep_fd_(-1),
+        epoll_initialized_(false),
         enabled_(true),
         oled_enabled_(true),
         oled_filled_(false),
@@ -56,19 +49,6 @@ public:
         y_cur_(y_cur)
     {
         cout<<"ButtonProcessing() constructor, name : "<<name_<<endl;
-        // switch(poll_mode_) {
-        //     case PollMode::SELECT:
-        //         cout<<"poll_mode_ = SELECT"<<endl;
-        //         break;
-        //     case PollMode::POLL:
-        //         cout<<"poll_mode_ = POLL"<<endl;
-        //         break;
-        //     case PollMode::EPOLL:
-        //         cout<<"poll_mode_ = EPOLL" << endl;
-        //         break;
-        //     default:
-        //         break;
-        // }
     }
 
     ~ButtonProcessing()
@@ -83,12 +63,12 @@ public:
 
         thread_.join();
 
-        // /* remove event from file descriptor */
-        // if (-1 != ep_fd_) {
-        //     if (0 > epoll_ctl(ep_fd_, EPOLL_CTL_DEL, fd_, NULL)) {
-        //         cout<<"epoll_ctl(EPOLL_CTL_DEL failure : "<<strerror(errno)<<endl;
-        //     }
-        // }
+        /* remove event from file descriptor */
+        if (-1 != ep_fd_) {
+            if (0 > epoll_ctl(ep_fd_, EPOLL_CTL_DEL, fd_, NULL)) {
+                cout<<"epoll_ctl(EPOLL_CTL_DEL failure : "<<strerror(errno)<<endl;
+            }
+        }
     }
 
     // Move Constructor
@@ -109,24 +89,25 @@ private:
     // PollMode poll_mode_;
 
     /* init the event poll epoll file descriptor */
-    int EpollInit(int epoll_size_approximation) {
+    int EpollInit(int epoll_size_approximation)
+    {
         int retval = 0;
 
-        // if (!epoll_initialized_) {
-        //     if (-1 != (retval = epoll_create(epoll_size_approximation))) {
-        //         ep_fd_ = retval;
-        //         retval = 0;
-        //         epoll_event event;
-        //         event.data.fd = fd_;
-        //         event.events = EPOLLIN;
-        //         if (0 != (retval = epoll_ctl(ep_fd_, EPOLL_CTL_ADD, fd_, &event))) {
-        //             cout<<"epoll_create() failure : "<<strerror(errno)<<endl;
-        //         }
-        //     } else {
-        //         cout<<"epoll_create() failure : "<<strerror(errno)<<endl;
-        //     }
-        //     epoll_initialized_ = true;
-        // }
+        if (!epoll_initialized_) {
+            if (-1 != (retval = epoll_create(epoll_size_approximation))) {
+                ep_fd_ = retval;
+                retval = 0;
+                epoll_event event;
+                event.data.fd = fd_;
+                event.events = EPOLLIN;
+                if (0 != (retval = epoll_ctl(ep_fd_, EPOLL_CTL_ADD, fd_, &event))) {
+                    cout<<"epoll_create() failure : "<<strerror(errno)<<endl;
+                }
+            } else {
+                cout<<"epoll_create() failure : "<<strerror(errno)<<endl;
+            }
+            epoll_initialized_ = true;
+        }
 
         return retval;
     }
@@ -137,98 +118,37 @@ private:
 
         int retval;
 
-        // select
-        fd_set read_fd_set;
-
-        // poll
-        pollfd read_fd_poll[1];      // could have multiple files we are polling
-
         while (enabled_) {
 
             sleep(1);
 
-            // switch(poll_mode_) {
+            // two events
+            int max_number_events = 2;
+            int num_events_received;
+            struct epoll_event epoll_events[max_number_events];
 
-            // case PollMode::SELECT:
+            /* estimate number of fd's as 2 */
+            EpollInit(2);
 
-            //     FD_ZERO(&read_fd_set);
-            //     FD_SET(fd_, &read_fd_set);
+            // blocking epoll call
+            if (0 < (num_events_received = epoll_wait(ep_fd_, epoll_events, max_number_events, -1))) {
 
-            //     /* select blocking mode */
-            //     if (-1 != (retval = select(fd_+1, &read_fd_set, NULL, NULL, NULL))) {
+                for (int i = 0; i < num_events_received; i++) {
 
-            //         if (FD_ISSET(fd_, &read_fd_set)) {
-            //             // cout<<"select() released"<<endl;
+                    cout<<"event : "<<epoll_events[i].events<<" on fd = "<<epoll_events[i].data.fd<<endl;
 
-            //             /* capture event bulk data */
-            //             struct EventBulkData event_bulk_data;
-            //             while (sizeof(struct EventBulkData) == read(fd_, &event_bulk_data, sizeof(struct EventBulkData))) {
-            //                 uint64_t event_number = event_bulk_data.capture_event.event;
-            //                 cout<<"event number : "<<event_number<<endl;
-            //             }
-            //         }
-            //     } else {
-            //         cout<<"select() failure : "<<strerror(errno)<<endl;
-            //     }
-
-            //     break;
-
-            // case PollMode::POLL:
-
-            //     read_fd_poll[0].fd = fd_;
-            //     read_fd_poll[0].events = POLLIN;
-
-            //     if (-1 != (retval = poll(read_fd_poll, 1, 0))) {
-
-            //         /* capture event bulk data */
-            //         struct EventBulkData event_bulk_data;
-            //         while (sizeof(struct EventBulkData) == read(fd_, &event_bulk_data, sizeof(struct EventBulkData))) {
-            //             uint64_t event_number = event_bulk_data.capture_event.event;
-            //             cout<<"event number : "<<event_number<<endl;
-            //         }
-            //     } else {
-            //         cout<<"poll() failure : "<<strerror(errno)<<endl;
-            //     }
-
-            //     break;
-
-            // case PollMode::EPOLL: {
-
-                // // two events
-                // int max_number_events = 2;
-                // int num_events_received;
-                // struct epoll_event epoll_events[max_number_events];
-
-                // /* estimate number of fd's as 2 */
-                // EpollInit(2);
-
-                // // blocking epoll call
-                // if (0 < (num_events_received = epoll_wait(ep_fd_, epoll_events, max_number_events, -1))) {
-
-                //     for (int i = 0; i < num_events_received; i++) {
-
-                //         cout<<"event : "<<epoll_events[i].events<<" on fd = "<<epoll_events[i].data.fd<<endl;
-
-                //         if (fd_ == epoll_events[i].data.fd) {
-                //             /* capture event bulk data */
-                //             struct EventBulkData event_bulk_data;
-                //             while (sizeof(struct EventBulkData) == read(fd_, &event_bulk_data, sizeof(struct EventBulkData))) {
-                //                 uint64_t event_number = event_bulk_data.capture_event.event;
-                //                 cout<<"event number : "<<event_number<<endl;
-                //             }
-                //         }
-                //     }
-                // } else {
-                //     cout<<"epoll_wait() failure : "<<strerror(num_events_received)<<endl;
-                // }
-
-            //     break;
-            // }
-
-            // default:
-            //     break;
-            // }
-
+                    if (fd_ == epoll_events[i].data.fd) {
+                        /* capture event bulk data */
+                        struct EventBulkData event_bulk_data;
+                        while (sizeof(struct EventBulkData) == read(fd_, &event_bulk_data, sizeof(struct EventBulkData))) {
+                            uint64_t event_number = event_bulk_data.capture_event.event;
+                            cout<<"event number : "<<event_number<<endl;
+                        }
+                    }
+                }
+            } else {
+                cout<<"epoll_wait() failure : "<<strerror(num_events_received)<<endl;
+            }
         }
 
         cout<<"thread "<<name_<<" exit"<<endl;
@@ -240,19 +160,12 @@ private:
     /* file descriptor to release any blocking poll() epoll() or select() calls */
     int fd_;
     /* epoll file descriptor */
-    // int ep_fd_;
-    // bool epoll_initialized_;
+    int ep_fd_;
+    bool epoll_initialized_;
 
     /* thread loop control */
     bool enabled_;
 };
-
-// enum class TestModeE {
-//     GPIO_TOGGLE_MODE,
-//     GPIO_BURST_MODE,
-//     GPIO_DUTY_CYCLE_MODE,
-// };
-
 
 
 void print_key_processing()
@@ -294,12 +207,6 @@ static void process_key_entry(int fd)
         0x00, short_period_msec};
 
     shared_ptr<ButtonProcessing> button_processing = std::make_shared<ButtonProcessing>("test", fd);
-
-    /* test modes */
-    // TestModeE test_mode = TestModeE::GPIO_TOGGLE_MODE;
-
-    /* blocking read types */
-    // ButtonProcessing::PollMode poll_mode = ButtonProcessing::PollMode::SELECT;
 
     print_key_processing();
 

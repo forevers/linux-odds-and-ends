@@ -586,12 +586,26 @@ static int ess_oled_remove(struct i2c_client *client)
     return 0;
 }
 
+
 /* fops read */
 ssize_t ess_oled_read(struct file *f, char __user *buff, size_t count, loff_t *pos)
 {
-    PR_INFO("entry()");
-    PR_INFO("exit()");
-    return 0;
+    ssize_t size;
+    PR_INFO("entry");
+    size = gpio_oled_irq_read(f, buff, count, pos);
+    PR_INFO("exit");
+    return size;
+    //return 0;
+}
+
+
+__poll_t ess_oled_poll(struct file *f, struct poll_table_struct *wait)
+{
+    __poll_t poll;
+    PR_INFO("entry");
+    poll = gpio_oled_irq_poll(f, wait);
+    PR_INFO("exit");
+    return poll;
 }
 
 

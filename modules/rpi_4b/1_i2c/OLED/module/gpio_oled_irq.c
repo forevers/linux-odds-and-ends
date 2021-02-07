@@ -58,7 +58,8 @@ struct EventBulkData {
 struct ESSWorkStructWrapper {
     struct work_struct event_work_struct;
     struct CircularBufferPow2 capture_event_buffer;     /* upper half irq data */
-    bool poll_enabled;                                  /* device supports polling */ 
+    // TOD remove remove ... always enabled in this driver
+    // bool poll_enabled;                                  /* device supports polling */ 
     wait_queue_head_t capture_event_waitqueue;          /* irq lower half processing by workqueue (or tasklet TODO) */
     uint64_t event;                                     /* incrementing event number */
     struct CircularBufferPow2 event_bulk_data_buffer;   /* lower half data */
@@ -100,7 +101,7 @@ int gpio_oled_irq_init(void)
             PR_INFO("init() success");
 
             ess_work_struct_wrapper_.event = 0;
-            ess_work_struct_wrapper_.poll_enabled = false;
+            // ess_work_struct_wrapper_.poll_enabled = false;
 
             /* irq reads fill capture_event_buffer */
             init_waitqueue_head(&ess_work_struct_wrapper_.capture_event_waitqueue);
@@ -163,67 +164,68 @@ int gpio_oled_irq_init(void)
     return result;
 }
 
-// /* when device is in ESS_DUTY_CYCLE_GPIO mode, the read pulls from a buffer */
-// ssize_t gpio_irq_demo_read(struct file *f, char __user *buff, size_t count, loff_t *pos)
-// {
-//     ssize_t bytes_read = 0;
+/* pulls from a buffer */
+ssize_t gpio_oled_irq_read(struct file *f, char __user *buff, size_t count, loff_t *pos)
+{
+    ssize_t bytes_read = 0;
 
-//     PR_INFO("entry");
+    PR_INFO("entry");
 
-//     PR_INFO("count passed: %zu, expect mod of %u", count, sizeof(struct EventBulkData));
+    PR_INFO("count passed: %zu, expect mod of %lu", count, sizeof(struct EventBulkData));
 
-//     if (1 == count) {
+    // if (1 == count) {
 
-//         PR_INFO("read current value");
+    //     PR_INFO("read current value");
 
-//         /* read current value */
-//         *buff = gpio_get_value(gpio_num_output_);
-//         return 1;
+    //     /* read current value */
+    //     *buff = gpio_get_value(gpio_num_output_);
+    //     return 1;
 
-//     } else if ((count % sizeof(struct EventBulkData)) == 0) {
+    // } else 
+    if ((count % sizeof(struct EventBulkData)) == 0) {
 
-//         struct EventBulkData* event_bulk_data;
-//         struct CircularBufferMod2* event_bulk_data_buffer;
+        struct EventBulkData* event_bulk_data;
+        struct CircularBufferPow2* event_bulk_data_buffer;
 
-//         PR_INFO("read oldest event");
+        PR_INFO("read oldest event");
 
-//         event_bulk_data_buffer = &ess_work_struct_wrapper_.event_bulk_data_buffer;
+        event_bulk_data_buffer = &ess_work_struct_wrapper_.event_bulk_data_buffer;
 
-//         /* read from event_bulk_data_buffer */
-//         mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
+        /* read from event_bulk_data_buffer */
+        mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
 
-//         while ( (count >= sizeof(struct EventBulkData)) && space(event_bulk_data_buffer)) {
+        while ( (count >= sizeof(struct EventBulkData)) && space(event_bulk_data_buffer)) {
 
-//             count -= sizeof(struct EventBulkData);
+            count -= sizeof(struct EventBulkData);
 
-//             if (NULL != (event_bulk_data = front(event_bulk_data_buffer))) {
+            if (NULL != (event_bulk_data = front(event_bulk_data_buffer))) {
 
-//                 if (!copy_to_user(buff, event_bulk_data, sizeof(struct EventBulkData))) {
-//                     buff += sizeof(struct EventBulkData);
-//                     bytes_read += sizeof(struct EventBulkData);
-//                     pop(event_bulk_data_buffer);
-//                 } else {
-//                     PR_ERR("copy_to_user() failure");
-//                     bytes_read = -EPERM;
-//                     break;
-//                 }
-//             } else {
-//                 PR_ERR("front() failure");
-//                 bytes_read = -EPERM;
-//                 break;
-//             }
-//         }
+                if (!copy_to_user(buff, event_bulk_data, sizeof(struct EventBulkData))) {
+                    buff += sizeof(struct EventBulkData);
+                    bytes_read += sizeof(struct EventBulkData);
+                    pop(event_bulk_data_buffer);
+                } else {
+                    PR_ERR("copy_to_user() failure");
+                    bytes_read = -EPERM;
+                    break;
+                }
+            } else {
+                PR_ERR("front() failure");
+                bytes_read = -EPERM;
+                break;
+            }
+        }
 
-//         mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
+        mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
 
-//     } else {
-//         /* invalid read request size*/
-//         PR_ERR("invalid read request size");
-//         bytes_read = -EPERM;
-//     }
+    } else {
+        /* invalid read request size*/
+        PR_ERR("invalid read request size");
+        bytes_read = -EPERM;
+    }
 
-//     return bytes_read;
-// }
+    return bytes_read;
+}
 
 
 // ssize_t gpio_irq_demo_write(struct file *f, const char __user *buff, size_t count, loff_t *pos)
@@ -393,12 +395,11 @@ void gpio_oled_irq_exit(void)
     POLLWRBAND
         Like POLLRDBAND, this bit means that data with nonzero priority can be written to the device. Only the datagram implementation of poll uses this bit, since a datagram can transmit out-of-band data.
 */
-__poll_t gpio_irq_oled_poll(struct file *f, struct poll_table_struct *wait)
+__poll_t gpio_oled_irq_poll(struct file *f, struct poll_table_struct *wait)
 {
     unsigned int ret_val_mask = 0;
 
     PR_INFO("entry");
-    PR_INFO("ess_work_struct_wrapper_.poll_enabled == %s", ((ess_work_struct_wrapper_.poll_enabled == true) ? "true" : "false"));
 
     poll_wait(f, &(ess_work_struct_wrapper_.capture_event_waitqueue), wait);
 
@@ -411,8 +412,6 @@ __poll_t gpio_irq_oled_poll(struct file *f, struct poll_table_struct *wait)
         ret_val_mask = POLLIN | POLLRDNORM;
     } else {
         PR_INFO("poll sleep");
-        if (false == ess_work_struct_wrapper_.poll_enabled)
-            ret_val_mask = POLLHUP;
     }
     mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
 
