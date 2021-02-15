@@ -20,15 +20,51 @@
     $ cat /proc/interrupts
 */
 
-static irq_handler_t gpio_irq_handler(unsigned int irq, void* dev_id, struct pt_regs* regs);
+static irq_handler_t gpio_btn_5_irq_handler(unsigned int irq, void* dev_id);
+
+static irq_handler_t gpio_btn_6_irq_handler(unsigned int irq, void* dev_id);
+
+static irq_handler_t gpio_rocker_4_irq_handler(unsigned int irq, void* dev_id);
+static irq_handler_t gpio_rocker_17_irq_handler(unsigned int irq, void* dev_id);
+static irq_handler_t gpio_rocker_23_irq_handler(unsigned int irq, void* dev_id);
+static irq_handler_t gpio_rocker_22_irq_handler(unsigned int irq, void* dev_id);
+static irq_handler_t gpio_rocker_27_irq_handler(unsigned int irq, void* dev_id);
+
 static void do_work(struct work_struct* work);
 
-// static unsigned int gpio_num_irq_input_ = 27;
-static unsigned int button_5_irq_input_ = 5;
-static unsigned int button_6_irq_input_ = 6;
+// TODO dts assignment of gpio pins
+#define BUTTON_5 0
+#define BUTTON_6 1
+#define ROCKER_D 2
+#define ROCKER_N 3
+#define ROCKER_S 4
+#define ROCKER_E 6
+#define ROCKER_W 7
 
-// static unsigned int gpio_num_output_ = 24;
-static unsigned int irq_number_;
+static char button_5_[] = "oled button 5";
+static char button_6_[] = "oled button 6";
+static char rocker_4_[] = "oled rocker 4";
+static char rocker_17_[] = "oled rocker 17";
+static char rocker_22_[] = "oled rocker 22";
+static char rocker_23_[] = "oled rocker 23";
+static char rocker_27_[] = "oled rocker 27";
+
+static unsigned int button_5_gpio_input_ = 5;
+static unsigned int button_6_gpio_input_ = 6;
+static unsigned int rocker_4_gpio_input_ = 4;
+static unsigned int rocker_17_gpio_input_ = 17;
+static unsigned int rocker_22_gpio_input_ = 22;
+static unsigned int rocker_23_gpio_input_ = 23;
+static unsigned int rocker_27_gpio_input_ = 27;
+
+static unsigned int button_5_irq_number_;
+static unsigned int button_6_irq_number_;
+static unsigned int rocker_4_irq_number_;
+static unsigned int rocker_17_irq_number_;
+static unsigned int rocker_22_irq_number_;
+static unsigned int rocker_23_irq_number_;
+static unsigned int rocker_27_irq_number_;
+
 static unsigned int num_irqs_ = 0;
 static int gpio_can_sleep_;
 static bool gpio_can_debounce_;
@@ -43,7 +79,7 @@ static bool gpio_can_debounce_;
 
 /* capture event metadata */
 struct CaptureEvent {
-    bool rising;            /* is rising edge */
+    int button_num;         /* button number */
     uint64_t event;         /* incrementing event number */
 };
 
@@ -64,6 +100,9 @@ struct ESSWorkStructWrapper {
     uint64_t event;                                     /* incrementing event number */
     struct CircularBufferPow2 event_bulk_data_buffer;   /* lower half data */
     struct mutex event_bulk_data_mtx;                   /* event_bulk_data_buffer access mutex */
+
+    unsigned int button_irq_numbers[7];
+    irq_handler_t handlers[7];
 } ess_work_struct_wrapper_;
 
 // static enum hrtimer_restart my_kt_function(struct hrtimer *hr_timer)
@@ -86,6 +125,55 @@ struct ESSWorkStructWrapper {
 //     // HRTIMER_RESTART timer is retarting vs HRTIMER_NORESTART timer is terminating
 //     return HRTIMER_RESTART;
 // }
+
+
+/* configure rising edge interrupt handler irq_handler on interrupt number irq_number*/
+int gpio_oled_irq(int button_idx, char* dev_name, unsigned int gpio_input, irq_handler_t irq_handler, unsigned int* irq_number)
+{
+    int result;
+
+    /* gpio irq configuration */
+    /* /sys/kernel/debug/gpio/<label> */
+    // TODO consider to moving much of this to the open() call to allow potential HW sharing
+    if (0 == (result = gpio_request(gpio_input, "gpio_input"))) {
+        PR_INFO("gpio_request() success");
+
+        if (0 == (result = gpio_direction_input(gpio_input))) {
+            PR_INFO("gpio_direction_input() success");
+
+            /* TODO - does rpi not impl gpio_set_debounce() */
+            if (0 == (result = gpio_set_debounce(gpio_input, 200))) { // msec
+                gpio_can_debounce_ = true;
+            } else {
+                PR_ERR("gpio_set_debounce() failure: %d", result);
+                gpio_can_debounce_ = false;
+            }
+
+            /* allow presentation of gpio in sysfs, but do not allow userspace apps to control pin direction 
+                  i.e. $ sudo cat /sys/kernel/debug/gpio
+            */
+            // gpio_export(gpio_input, false);
+            if (0 <= (*irq_number = gpio_to_irq(gpio_input))) {
+                // TODO pass as reference
+                ess_work_struct_wrapper_.button_irq_numbers[button_idx] = *irq_number;
+                ess_work_struct_wrapper_.handlers[button_idx] = irq_handler;
+
+                if (0 != (result = request_irq(*irq_number, irq_handler, IRQF_TRIGGER_RISING, dev_name, NULL))) {
+                    PR_ERR("request_irq() failure: %d", result);
+                }
+            } else {
+                PR_ERR("gpio_to_irq() failure: %d", *irq_number);
+            }
+        } else {
+            PR_ERR("gpio_direction_input() failure: %d", result);
+            gpio_free(gpio_input);
+        }
+    } else {
+        PR_ERR("gpio_request(%d) failure: %d", gpio_input, result);
+    }
+
+    return result;
+}
 
 
 int gpio_oled_irq_init(void)
@@ -123,14 +211,14 @@ int gpio_oled_irq_init(void)
     /* gpio irq configuration */
     /* /sys/kernel/debug/gpio/<label> */
     // TODO consider to moving much of this to the open() call to allow potential HW sharing
-    if (0 == (result = gpio_request(button_5_irq_input_, "button_5_irq_input_label"))) {
+    if (0 == (result = gpio_request(button_5_gpio_input_, "button_5_gpio_input_label"))) {
         PR_INFO("gpio_request() success");
 
-        if (0 == (result = gpio_direction_input(button_5_irq_input_))) {
+        if (0 == (result = gpio_direction_input(button_5_gpio_input_))) {
             PR_INFO("gpio_direction_input() success");
 
             /* TODO - does rpi not impl gpio_set_debounce() */
-            if (0 == (result = gpio_set_debounce(button_5_irq_input_, 200))) { // msec
+            if (0 == (result = gpio_set_debounce(button_5_gpio_input_, 200))) { // msec
                 gpio_can_debounce_ = true;
             } else {
                 PR_ERR("gpio_set_debounce() failure: %d", result);
@@ -140,24 +228,49 @@ int gpio_oled_irq_init(void)
             /* allow presentation of gpio in sysfs, but do not allow userspace apps to control pin direction 
                   i.e. $ sudo cat /sys/kernel/debug/gpio
             */
-            gpio_export(button_5_irq_input_, false);
-            if (0 <= (irq_number_ = gpio_to_irq(button_5_irq_input_))) {
-                PR_INFO("gpio_to_irq() success");
+            // gpio_export(button_5_gpio_input_, false);
+            if (0 <= (button_5_irq_number_ = gpio_to_irq(button_5_gpio_input_))) {
+                ess_work_struct_wrapper_.button_irq_numbers[BUTTON_5] = button_5_irq_number_;
 
                 // TODO pass device object to driver in last parameter
-                if (0 != (result = request_irq(irq_number_, (irq_handler_t)gpio_irq_handler, IRQF_TRIGGER_RISING, "gpio_irq_handler", NULL))) {
+                if (0 != (result = request_irq(button_5_irq_number_, (irq_handler_t)gpio_btn_5_irq_handler, IRQF_TRIGGER_RISING, "gpio_btn_5_irq_handler", NULL))) {
                     PR_ERR("request_irq() failure: %d", result);
                 }
             } else {
-                PR_ERR("gpio_to_irq() failure: %d", irq_number_);
+                PR_ERR("gpio_to_irq() failure: %d", button_5_irq_number_);
             }
         } else {
             PR_ERR("gpio_direction_input() failure: %d", result);
-            // gpio_free(gpio_num_irq_input_);
-            gpio_free(button_5_irq_input_);
+            gpio_free(button_5_gpio_input_);
         }
     } else {
         PR_ERR("gpio_request() failure: %d", result);
+    }
+    if (result != 0) return result;
+
+    if (0 != (result = gpio_oled_irq(BUTTON_6, button_6_, button_6_gpio_input_, (irq_handler_t)gpio_btn_6_irq_handler, &button_6_irq_number_))) {
+        PR_ERR("button_6_irq_number_ configuration failure: %d", result);
+        return result;
+    }
+    if (0 != (result = gpio_oled_irq(ROCKER_D, rocker_4_, rocker_4_gpio_input_, (irq_handler_t)gpio_rocker_4_irq_handler, &rocker_4_irq_number_))) {
+        PR_ERR("rocker_4_irq_number_ configuration failure: %d", result);
+        return result;
+    }
+    if (0 != (result = gpio_oled_irq(ROCKER_N, rocker_17_, rocker_17_gpio_input_, (irq_handler_t)gpio_rocker_17_irq_handler, &rocker_17_irq_number_))) {
+        PR_ERR("rocker_17_irq_number_ configuration failure: %d", result);
+        return result;
+    }
+    if (0 != (result = gpio_oled_irq(ROCKER_S, rocker_22_, rocker_22_gpio_input_, (irq_handler_t)gpio_rocker_22_irq_handler, &rocker_22_irq_number_))) {
+        PR_ERR("rocker_22_irq_number_ configuration failure: %d", result);
+        return result;
+    }
+    if (0 != (result = gpio_oled_irq(ROCKER_E, rocker_23_, rocker_23_gpio_input_, (irq_handler_t)gpio_rocker_23_irq_handler, &rocker_23_irq_number_))) {
+        PR_ERR("rocker_23_irq_number_ configuration failure: %d", result);
+        return result;
+    }
+    if (0 != (result = gpio_oled_irq(ROCKER_W, rocker_27_, rocker_27_gpio_input_, (irq_handler_t)gpio_rocker_27_irq_handler, &rocker_27_irq_number_))) {
+        PR_ERR("rocker_27_irq_number_ configuration failure: %d", result);
+        return result;
     }
 
     PR_INFO("exit");
@@ -344,13 +457,43 @@ void gpio_oled_irq_exit(void)
 
     PR_INFO("entry");
     PR_INFO("num_irqs_: %d", num_irqs_);
-    free_irq(irq_number_, NULL);
-    gpio_unexport(button_5_irq_input_);
 
-    gpio_free(button_5_irq_input_);
+    PR_INFO("gpio free %d", button_5_irq_number_);
+    gpio_free(button_5_gpio_input_);
+    PR_INFO("free irq %d", ess_work_struct_wrapper_.button_irq_numbers[BUTTON_5]);
+    free_irq(ess_work_struct_wrapper_.button_irq_numbers[BUTTON_5], NULL);
+
+    PR_INFO("gpio free %d", button_6_irq_number_);
+    gpio_free(button_6_gpio_input_);
+    PR_INFO("free irq %d", ess_work_struct_wrapper_.button_irq_numbers[BUTTON_6]);
+    free_irq(ess_work_struct_wrapper_.button_irq_numbers[BUTTON_6], NULL);
+
+    PR_INFO("gpio free %d", rocker_4_irq_number_);
+    gpio_free(rocker_4_gpio_input_);
+    PR_INFO("free irq %d", ess_work_struct_wrapper_.button_irq_numbers[ROCKER_D]);
+    free_irq(ess_work_struct_wrapper_.button_irq_numbers[ROCKER_D], NULL);
+
+    PR_INFO("gpio free %d", rocker_17_irq_number_);
+    gpio_free(rocker_17_gpio_input_);
+    PR_INFO("free irq %d", ess_work_struct_wrapper_.button_irq_numbers[ROCKER_N]);
+    free_irq(ess_work_struct_wrapper_.button_irq_numbers[ROCKER_N], NULL);
+
+    PR_INFO("gpio free %d", rocker_22_irq_number_);
+    gpio_free(rocker_22_gpio_input_);
+    PR_INFO("free irq %d", ess_work_struct_wrapper_.button_irq_numbers[ROCKER_S]);
+    free_irq(ess_work_struct_wrapper_.button_irq_numbers[ROCKER_S], NULL);
+
+    PR_INFO("gpio free %d", rocker_23_irq_number_);
+    gpio_free(rocker_23_gpio_input_);
+    PR_INFO("free irq %d", ess_work_struct_wrapper_.button_irq_numbers[ROCKER_E]);
+    free_irq(ess_work_struct_wrapper_.button_irq_numbers[ROCKER_E], NULL);
+
+    PR_INFO("gpio free %d", rocker_27_irq_number_);
+    gpio_free(rocker_27_gpio_input_);
+    PR_INFO("free irq %d", ess_work_struct_wrapper_.button_irq_numbers[ROCKER_W]);
+    free_irq(ess_work_struct_wrapper_.button_irq_numbers[ROCKER_W], NULL);
 
     // gpio_unexport(gpio_num_output_);
-    // gpio_free(gpio_num_output_);
 
     // /* timer resources */
     // PR_INFO("cancel active time");
@@ -371,7 +514,7 @@ void gpio_oled_irq_exit(void)
     PR_INFO("release event_bulk_data_buffer");
     release(&ess_work_struct_wrapper_.event_bulk_data_buffer);
 
-    PR_INFO("entry");
+    PR_INFO("exit");
 }
 
 
@@ -419,28 +562,74 @@ __poll_t gpio_oled_irq_poll(struct file *f, struct poll_table_struct *wait)
 }
 
 /* maintain a low overhead list of events between interrupt and work queue */
-static irq_handler_t gpio_irq_handler(unsigned int irq, void* dev_id, struct pt_regs* regs)
+static irq_handler_t gpio_btn_5_irq_handler(unsigned int irq, void* dev_id)
 {
     struct CircularBufferPow2* capture_event_buffer = &ess_work_struct_wrapper_.capture_event_buffer;
 
     static uint64_t counter = 0;
+    struct CaptureEvent capture_event;
 
-    PR_INFO("entry");
     PR_INFO("num_irqs_ = %d", ++num_irqs_);
+    PR_ERR("irq %u", irq);
 
-    /* access capture_event_buffer */
-    // log rising edge and count
-    {
-        struct CaptureEvent capture_event;
-        capture_event.rising = 1;
-        capture_event.event = ++counter;
-        PR_INFO("pushing event %lld", capture_event.event);
-        push(capture_event_buffer, &capture_event);
-    }
+    capture_event.button_num = BUTTON_5;
 
-    // TODO pass info in regs
+    capture_event.event = ++counter;
+    PR_INFO("pushing event %lld", capture_event.event);
+    push(capture_event_buffer, &capture_event);
+
     schedule_work(&ess_work_struct_wrapper_.event_work_struct);
 
+    return (irq_handler_t) IRQ_HANDLED;
+}
+
+
+static irq_handler_t gpio_btn_6_irq_handler(unsigned int irq, void* dev_id)
+{
+    struct CircularBufferPow2* capture_event_buffer = &ess_work_struct_wrapper_.capture_event_buffer;
+
+    static uint64_t counter = 0;
+    struct CaptureEvent capture_event;
+
+    PR_ERR("ess_work_struct_wrapper_ @ 0x%p", dev_id);
+    PR_INFO("entry");
+    PR_INFO("num_irqs_ = %d", ++num_irqs_);
+    PR_ERR("irq %u", irq);
+
+    /* access capture_event_buffer */
+    capture_event.event = ++counter;
+    PR_INFO("pushing event %lld", capture_event.event);
+    push(capture_event_buffer, &capture_event);
+
+    schedule_work(&ess_work_struct_wrapper_.event_work_struct);
+
+    return (irq_handler_t) IRQ_HANDLED;
+}
+
+
+static irq_handler_t gpio_rocker_4_irq_handler(unsigned int irq, void* dev_id)
+{
+    PR_INFO("depress rocker");
+    return (irq_handler_t) IRQ_HANDLED;
+}
+static irq_handler_t gpio_rocker_17_irq_handler(unsigned int irq, void* dev_id)
+{
+    PR_INFO("north rocker");
+    return (irq_handler_t) IRQ_HANDLED;
+}
+static irq_handler_t gpio_rocker_22_irq_handler(unsigned int irq, void* dev_id)
+{
+    PR_INFO("south rocker");
+    return (irq_handler_t) IRQ_HANDLED;
+}
+static irq_handler_t gpio_rocker_23_irq_handler(unsigned int irq, void* dev_id)
+{
+    PR_INFO("east rocker");
+    return (irq_handler_t) IRQ_HANDLED;
+}
+static irq_handler_t gpio_rocker_27_irq_handler(unsigned int irq, void* dev_id)
+{
+    PR_INFO("west rocker");
     return (irq_handler_t) IRQ_HANDLED;
 }
 
@@ -452,7 +641,7 @@ static void do_work(struct work_struct* work)
     struct ESSWorkStructWrapper* ess_work_struct_wrapper;
     struct CaptureEvent* capture_event_ref;
     struct CaptureEvent capture_event;
-    unsigned long flags;
+    // unsigned long flags;
     uint64_t idx;
     static int test_entry = 0;
 
@@ -467,8 +656,8 @@ static void do_work(struct work_struct* work)
         PR_INFO("element_size : %zd", ess_work_struct_wrapper->capture_event_buffer.element_size);
         memcpy(&capture_event, capture_event_ref, ess_work_struct_wrapper->capture_event_buffer.element_size);
         pop(&ess_work_struct_wrapper->capture_event_buffer);
-        PR_INFO("capture_event : %s, %lld", (capture_event.rising == true) ? "rising" : "falling", capture_event.event);
-    
+        PR_INFO("button_num : %d, %lld", capture_event.button_num, capture_event.event);
+
         /* access event_bulk_data_buffer, shared by poll and read() */
         // TODO investigate interruptable version
         mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
