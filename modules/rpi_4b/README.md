@@ -186,12 +186,9 @@
         ```
 
 # TODO
-- LKM instructions for 32 and 64bit OS
 - extend docker image to support LKM and built ins
-- rpi utilities for i2c 
-- stock i2c targets and bboard config
-- simple lkm i2c probe example
-- simple moc i2c device driver (emulation of i2c device)
+- rpi utilities for i2c
+- rpi utilities for spi
 
 # LKM module build
 
