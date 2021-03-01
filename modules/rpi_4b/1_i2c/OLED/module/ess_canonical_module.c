@@ -97,9 +97,9 @@ int ess_close(struct inode *i, struct file *f)
 ssize_t ess_read(struct file *f, char __user *buff, size_t count, loff_t *pos)
 {
     ssize_t size;
-    PR_INFO("entry");
+    // PR_INFO("entry");
     size = ess_oled_read(f, buff, count, pos);
-    PR_INFO("exit");
+    // PR_INFO("exit");
     return size;
 }
 
@@ -139,9 +139,9 @@ static long ess_compat_ioctl(struct file *f, unsigned int cmd, unsigned long arg
 __poll_t ess_poll(struct file *f, struct poll_table_struct *wait)
 {
     __poll_t poll;
-    PR_INFO("entry");
+    // PR_INFO("entry");
     poll = gpio_oled_irq_poll(f, wait);
-    PR_INFO("exit");
+    // PR_INFO("exit");
     return poll;
 }
 

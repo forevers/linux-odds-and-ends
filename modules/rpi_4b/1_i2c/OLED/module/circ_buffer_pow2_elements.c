@@ -45,7 +45,7 @@ void release(struct CircularBufferPow2* circular_buffer_mod2)
 
 _Bool empty(struct CircularBufferPow2* buffer)
 {
-    PR_INFO("entry");
+    // PR_INFO("entry");
 
     return buffer->head == buffer->tail;
 }
@@ -63,7 +63,7 @@ size_t size(struct CircularBufferPow2* buffer)
     int head = READ_ONCE(buffer->head);
     int tail = READ_ONCE(buffer->tail);
 
-    PR_INFO("entry");
+    // PR_INFO("entry");
     return (head - tail) & (buffer->capacity-1);
 }
 
@@ -73,7 +73,7 @@ size_t space(struct CircularBufferPow2* buffer)
     int tail = READ_ONCE(buffer->tail);
     size_t space = CIRC_CNT(tail, head+1, buffer->capacity);
 
-    PR_INFO("capacity : %ld, space : %zu, head : %d, tail : %d", buffer->capacity, space, buffer->head, buffer->tail);
+    // PR_INFO("capacity : %ld, space : %zu, head : %d, tail : %d", buffer->capacity, space, buffer->head, buffer->tail);
 
     return space;
 }
@@ -84,7 +84,7 @@ size_t events_pending_to_end(struct CircularBufferPow2* buffer)
     int64_t end = buffer->size - buffer->tail;
     int64_t num_events = ((buffer->head) + end) & ((buffer->size)-1);
 
-    PR_INFO("entry");
+    // PR_INFO("entry");
 
     return num_events;
 }
@@ -96,7 +96,7 @@ int push(struct CircularBufferPow2* buffer, void* element)
     int tail = READ_ONCE(buffer->tail);
     size_t space;
 
-    PR_INFO("entry");
+    // PR_INFO("entry");
 
     space = CIRC_SPACE(head, tail, buffer->capacity);
     if (space >= 1) {
@@ -105,8 +105,7 @@ int push(struct CircularBufferPow2* buffer, void* element)
         // TODO investigate smp
         // smp_store_release(buffer->head, (head + 1) & (buffer->size - 1));
         head = READ_ONCE(buffer->head);
-        PR_INFO("capacity : %ld, head : %d, tail : %d", buffer->capacity, head, tail);
-        // PR_INFO("capacity : %ld, buffer->head : %d, buffer->tail : %d", buffer->capacity, buffer->head, buffer->tail);
+        // PR_INFO("capacity : %ld, head : %d, tail : %d", buffer->capacity, head, tail);
     } else {
         retval = -1;
         PR_ERR("buffer is full, capacity : %ld, head : %d, tail : %d", buffer->capacity, head, tail);
@@ -120,11 +119,11 @@ void* front(struct CircularBufferPow2* buffer)
     void* event = NULL;
     int tail = READ_ONCE(buffer->tail);
 
-    PR_INFO("entry");
+    // PR_INFO("entry");
 
     if (CIRC_CNT(buffer->head, tail, buffer->capacity)) {
         event = buffer->buffer + (tail)*(buffer->element_size);
-        PR_INFO("capacity : %ld, head : %d, tail : %d", buffer->capacity, buffer->head, tail);
+        // PR_INFO("capacity : %ld, head : %d, tail : %d", buffer->capacity, buffer->head, tail);
     }
 
     return event;
@@ -134,14 +133,13 @@ void pop(struct CircularBufferPow2* buffer)
 {
     int tail = READ_ONCE(buffer->tail);
 
-    PR_INFO("entry");
+    // PR_INFO("entry");
 
     if (CIRC_CNT(buffer->head, tail, buffer->capacity)) {
         WRITE_ONCE(buffer->tail, (tail + 1) & (buffer->capacity - 1));
         tail = READ_ONCE(buffer->tail);
-        PR_INFO("capacity : %ld, head : %d, tail : %d", buffer->capacity, buffer->head, tail);
+        // PR_INFO("capacity : %ld, head : %d, tail : %d", buffer->capacity, buffer->head, tail);
     } else {
         PR_ERR("buffer is empty");
     }
 }
-

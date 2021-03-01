@@ -2,9 +2,6 @@
 
 #include <linux/ioctl.h>
 
-// #define ESS_SET_GPIO_SEQ_NUM            0x01
-// #define ESS_CLR_GPIO_SEQ_NUM            0x02
-// #define ESS_DUTY_CYCLE_GPIO_SEQ_NUM     0x03
 /* ioctl and write commands */
 /* 1 parameter commands */
 #define CMD_DISABLE_SEQ_NUM         0x01
@@ -14,9 +11,6 @@
 #define CMD_RELEASE_POLL_SEQ_NUM    0x05
 
 #define ESS_MAGIC 'E'
-// #define ESS_SET_GPIO                _IO(ESS_MAGIC, ESS_SET_GPIO_SEQ_NUM)
-// #define ESS_CLR_GPIO                _IO(ESS_MAGIC, ESS_CLR_GPIO_SEQ_NUM)
-// #define ESS_DUTY_CYCLE_GPIO         _IOW(ESS_MAGIC, ESS_DUTY_CYCLE_GPIO_SEQ_NUM, unsigned long)
 #define IOCTL_DISABLE                 _IO(ESS_MAGIC, CMD_DISABLE_SEQ_NUM)
 #define IOCTL_ENABLE                  _IO(ESS_MAGIC, CMD_ENABLE_SEQ_NUM)
 #define IOCTL_FILL_BUFFER             _IO(ESS_MAGIC, CMD_FILL_BUFFER_SEQ_NUM)
@@ -45,22 +39,29 @@
     #define RECT_WIDTH      0x03
     #define RECT_HEIGHT     0x04
 
-
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/* button enumeration */
+#define BUTTON_5 0
+#define BUTTON_6 1
+#define ROCKER_D 2
+#define ROCKER_N 3
+#define ROCKER_S 4
+#define ROCKER_E 6
+#define ROCKER_W 7
+
 /* capture event metadata */
 struct CaptureEvent {
-    bool rising;            /* is rising edge */
+    int button_num;         /* button number */
     uint64_t event;         /* incrementing event number */
 };
 
 /* capture event bulk data */
 struct EventBulkData {
     struct CaptureEvent capture_event;      /* raw capture event data */
-    uint64_t bulk_data[10];                  /* bulk data associated with capture event */
+    uint64_t bulk_data[10];                 /* bulk data associated with capture event */
 };
 
 #ifdef __cplusplus

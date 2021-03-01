@@ -762,9 +762,9 @@ long ess_oled_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
             }
             break;
         case IOCTL_RELEASE_POLL:
+            gpio_irq_ioctl(f, cmd, arg);
             break;
         default:
-
             retval = -EPERM;
             break;
 

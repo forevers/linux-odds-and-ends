@@ -2,14 +2,13 @@
 #include <linux/gpio.h>
 // #include <linux/hrtimer.h>
 #include <linux/interrupt.h>
+#include <linux/jiffies.h>
 #include <linux/mutex.h>
 #include <linux/poll.h>
 #include <linux/wait.h>
-// #include <linux/workqueue.h>
 
 #include "circ_buffer_pow2_elements.h"
-// #include "gpio_irq.h"
-// #include "gpio_irq_global.h"
+#include "i2c_oled_global.h"
 #include "util.h"
 
 /* This module uses the legacy interface for accessing and controlling the gpios.
@@ -18,36 +17,27 @@
 
     // user space query interrupt status
     $ cat /proc/interrupts
+
+    // sudo python ~/projects/oled/examples/ssd1306_bonnet_buttons.py prime the rocker gpio configuration
 */
 
+/* 2 button and 1 rocker switch */
 static irq_handler_t gpio_btn_5_irq_handler(unsigned int irq, void* dev_id);
-
 static irq_handler_t gpio_btn_6_irq_handler(unsigned int irq, void* dev_id);
+static irq_handler_t gpio_rocker_irq_handler(unsigned int irq, void* dev_id);
 
-static irq_handler_t gpio_rocker_4_irq_handler(unsigned int irq, void* dev_id);
-static irq_handler_t gpio_rocker_17_irq_handler(unsigned int irq, void* dev_id);
-static irq_handler_t gpio_rocker_23_irq_handler(unsigned int irq, void* dev_id);
-static irq_handler_t gpio_rocker_22_irq_handler(unsigned int irq, void* dev_id);
-static irq_handler_t gpio_rocker_27_irq_handler(unsigned int irq, void* dev_id);
-
+/* lower half processing */
 static void do_work(struct work_struct* work);
 
 // TODO dts assignment of gpio pins
-#define BUTTON_5 0
-#define BUTTON_6 1
-#define ROCKER_D 2
-#define ROCKER_N 3
-#define ROCKER_S 4
-#define ROCKER_E 6
-#define ROCKER_W 7
 
 static char button_5_[] = "oled button 5";
 static char button_6_[] = "oled button 6";
-static char rocker_4_[] = "oled rocker 4";
-static char rocker_17_[] = "oled rocker 17";
-static char rocker_22_[] = "oled rocker 22";
-static char rocker_23_[] = "oled rocker 23";
-static char rocker_27_[] = "oled rocker 27";
+static char rocker_4_[] = "oled rocker down 4";
+static char rocker_17_[] = "oled rocker north 17";
+static char rocker_22_[] = "oled rocker south 22";
+static char rocker_23_[] = "oled rocker east 23";
+static char rocker_27_[] = "oled rocker west 27";
 
 static unsigned int button_5_gpio_input_ = 5;
 static unsigned int button_6_gpio_input_ = 6;
@@ -66,36 +56,14 @@ static unsigned int rocker_23_irq_number_;
 static unsigned int rocker_27_irq_number_;
 
 static unsigned int num_irqs_ = 0;
-static int gpio_can_sleep_;
 static bool gpio_can_debounce_;
-
-// /* high resolution timer used to drive gpo pwm */
-// static struct HrtData {
-//     struct hrtimer timer;
-//     ktime_t period;
-//     long period_sec;
-//     unsigned long period_nsec;
-// } *my_hrt_data_;
-
-/* capture event metadata */
-struct CaptureEvent {
-    int button_num;         /* button number */
-    uint64_t event;         /* incrementing event number */
-};
-
-/* capture event bulk data */
-struct EventBulkData {
-    struct CaptureEvent capture_event;      /* raw capture event data */
-    uint64_t bulk_data[10];                  /* bulk data associated with capture event */
-};
 
 /* work queue for bottom half interrupt processing */
 // TODO create custom ess workqueue */
 struct ESSWorkStructWrapper {
     struct work_struct event_work_struct;
     struct CircularBufferPow2 capture_event_buffer;     /* upper half irq data */
-    // TOD remove remove ... always enabled in this driver
-    // bool poll_enabled;                                  /* device supports polling */ 
+    bool poll_enabled;                                  /* set to false to terminate user space blocking poll */ 
     wait_queue_head_t capture_event_waitqueue;          /* irq lower half processing by workqueue (or tasklet TODO) */
     uint64_t event;                                     /* incrementing event number */
     struct CircularBufferPow2 event_bulk_data_buffer;   /* lower half data */
@@ -104,27 +72,6 @@ struct ESSWorkStructWrapper {
     unsigned int button_irq_numbers[7];
     irq_handler_t handlers[7];
 } ess_work_struct_wrapper_;
-
-// static enum hrtimer_restart my_kt_function(struct hrtimer *hr_timer)
-// {
-//     ktime_t now , interval;
-//     int gpio_toggle_value = (gpio_get_value(gpio_num_output_) == 0) ? 1 : 0;
-
-//     if (1 == gpio_can_sleep_) {
-//         gpio_set_value_cansleep(gpio_num_output_, gpio_toggle_value);
-//     } else {
-//         gpio_set_value(gpio_num_output_, gpio_toggle_value);
-//     }
-
-//     PR_INFO("time_per_sec : %ld, time_per_nsec : %lu", my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
-
-//     now  = ktime_get();
-//     interval = ktime_set(my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
-//     hrtimer_forward(hr_timer, now , interval);
-
-//     // HRTIMER_RESTART timer is retarting vs HRTIMER_NORESTART timer is terminating
-//     return HRTIMER_RESTART;
-// }
 
 
 /* configure rising edge interrupt handler irq_handler on interrupt number irq_number*/
@@ -189,14 +136,13 @@ int gpio_oled_irq_init(void)
             PR_INFO("init() success");
 
             ess_work_struct_wrapper_.event = 0;
-            // ess_work_struct_wrapper_.poll_enabled = false;
+            ess_work_struct_wrapper_.poll_enabled = true;
 
             /* irq reads fill capture_event_buffer */
             init_waitqueue_head(&ess_work_struct_wrapper_.capture_event_waitqueue);
 
             INIT_WORK(&ess_work_struct_wrapper_.event_work_struct, do_work);
 
-            // sema_init(&(ess_work_struct_wrapper_->sem), 1);
             mutex_init(&ess_work_struct_wrapper_.event_bulk_data_mtx);
 
         } else {
@@ -211,64 +157,31 @@ int gpio_oled_irq_init(void)
     /* gpio irq configuration */
     /* /sys/kernel/debug/gpio/<label> */
     // TODO consider to moving much of this to the open() call to allow potential HW sharing
-    if (0 == (result = gpio_request(button_5_gpio_input_, "button_5_gpio_input_label"))) {
-        PR_INFO("gpio_request() success");
-
-        if (0 == (result = gpio_direction_input(button_5_gpio_input_))) {
-            PR_INFO("gpio_direction_input() success");
-
-            /* TODO - does rpi not impl gpio_set_debounce() */
-            if (0 == (result = gpio_set_debounce(button_5_gpio_input_, 200))) { // msec
-                gpio_can_debounce_ = true;
-            } else {
-                PR_ERR("gpio_set_debounce() failure: %d", result);
-                gpio_can_debounce_ = false;
-            }
-
-            /* allow presentation of gpio in sysfs, but do not allow userspace apps to control pin direction 
-                  i.e. $ sudo cat /sys/kernel/debug/gpio
-            */
-            // gpio_export(button_5_gpio_input_, false);
-            if (0 <= (button_5_irq_number_ = gpio_to_irq(button_5_gpio_input_))) {
-                ess_work_struct_wrapper_.button_irq_numbers[BUTTON_5] = button_5_irq_number_;
-
-                // TODO pass device object to driver in last parameter
-                if (0 != (result = request_irq(button_5_irq_number_, (irq_handler_t)gpio_btn_5_irq_handler, IRQF_TRIGGER_RISING, "gpio_btn_5_irq_handler", NULL))) {
-                    PR_ERR("request_irq() failure: %d", result);
-                }
-            } else {
-                PR_ERR("gpio_to_irq() failure: %d", button_5_irq_number_);
-            }
-        } else {
-            PR_ERR("gpio_direction_input() failure: %d", result);
-            gpio_free(button_5_gpio_input_);
-        }
-    } else {
-        PR_ERR("gpio_request() failure: %d", result);
+    if (0 != (result = gpio_oled_irq(BUTTON_5, button_5_, button_5_gpio_input_, (irq_handler_t)gpio_btn_5_irq_handler, &button_5_irq_number_))) {
+        PR_ERR("button_6_irq_number_ configuration failure: %d", result);
+        return result;
     }
-    if (result != 0) return result;
-
     if (0 != (result = gpio_oled_irq(BUTTON_6, button_6_, button_6_gpio_input_, (irq_handler_t)gpio_btn_6_irq_handler, &button_6_irq_number_))) {
         PR_ERR("button_6_irq_number_ configuration failure: %d", result);
         return result;
     }
-    if (0 != (result = gpio_oled_irq(ROCKER_D, rocker_4_, rocker_4_gpio_input_, (irq_handler_t)gpio_rocker_4_irq_handler, &rocker_4_irq_number_))) {
+    if (0 != (result = gpio_oled_irq(ROCKER_D, rocker_4_, rocker_4_gpio_input_, (irq_handler_t)gpio_rocker_irq_handler, &rocker_4_irq_number_))) {
         PR_ERR("rocker_4_irq_number_ configuration failure: %d", result);
         return result;
     }
-    if (0 != (result = gpio_oled_irq(ROCKER_N, rocker_17_, rocker_17_gpio_input_, (irq_handler_t)gpio_rocker_17_irq_handler, &rocker_17_irq_number_))) {
+    if (0 != (result = gpio_oled_irq(ROCKER_N, rocker_17_, rocker_17_gpio_input_, (irq_handler_t)gpio_rocker_irq_handler, &rocker_17_irq_number_))) {
         PR_ERR("rocker_17_irq_number_ configuration failure: %d", result);
         return result;
     }
-    if (0 != (result = gpio_oled_irq(ROCKER_S, rocker_22_, rocker_22_gpio_input_, (irq_handler_t)gpio_rocker_22_irq_handler, &rocker_22_irq_number_))) {
+    if (0 != (result = gpio_oled_irq(ROCKER_S, rocker_22_, rocker_22_gpio_input_, (irq_handler_t)gpio_rocker_irq_handler, &rocker_22_irq_number_))) {
         PR_ERR("rocker_22_irq_number_ configuration failure: %d", result);
         return result;
     }
-    if (0 != (result = gpio_oled_irq(ROCKER_E, rocker_23_, rocker_23_gpio_input_, (irq_handler_t)gpio_rocker_23_irq_handler, &rocker_23_irq_number_))) {
+    if (0 != (result = gpio_oled_irq(ROCKER_E, rocker_23_, rocker_23_gpio_input_, (irq_handler_t)gpio_rocker_irq_handler, &rocker_23_irq_number_))) {
         PR_ERR("rocker_23_irq_number_ configuration failure: %d", result);
         return result;
     }
-    if (0 != (result = gpio_oled_irq(ROCKER_W, rocker_27_, rocker_27_gpio_input_, (irq_handler_t)gpio_rocker_27_irq_handler, &rocker_27_irq_number_))) {
+    if (0 != (result = gpio_oled_irq(ROCKER_W, rocker_27_, rocker_27_gpio_input_, (irq_handler_t)gpio_rocker_irq_handler, &rocker_27_irq_number_))) {
         PR_ERR("rocker_27_irq_number_ configuration failure: %d", result);
         return result;
     }
@@ -282,25 +195,13 @@ ssize_t gpio_oled_irq_read(struct file *f, char __user *buff, size_t count, loff
 {
     ssize_t bytes_read = 0;
 
-    PR_INFO("entry");
+    // PR_INFO("entry");
+    // PR_INFO("count passed: %zu, expect mod of %lu", count, sizeof(struct EventBulkData));
 
-    PR_INFO("count passed: %zu, expect mod of %lu", count, sizeof(struct EventBulkData));
-
-    // if (1 == count) {
-
-    //     PR_INFO("read current value");
-
-    //     /* read current value */
-    //     *buff = gpio_get_value(gpio_num_output_);
-    //     return 1;
-
-    // } else 
     if ((count % sizeof(struct EventBulkData)) == 0) {
 
         struct EventBulkData* event_bulk_data;
         struct CircularBufferPow2* event_bulk_data_buffer;
-
-        PR_INFO("read oldest event");
 
         event_bulk_data_buffer = &ess_work_struct_wrapper_.event_bulk_data_buffer;
 
@@ -332,123 +233,31 @@ ssize_t gpio_oled_irq_read(struct file *f, char __user *buff, size_t count, loff
         mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
 
     } else {
-        /* invalid read request size*/
+        /* invalid read request size */
         PR_ERR("invalid read request size");
         bytes_read = -EPERM;
     }
 
+    PR_INFO("bytes_read: %ld", bytes_read);
     return bytes_read;
 }
 
 
-// ssize_t gpio_irq_demo_write(struct file *f, const char __user *buff, size_t count, loff_t *pos)
-// {
-//     size_t counts_remaining = count;
+long gpio_irq_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
+{
+    long retval = 0;
 
-//     PR_INFO("entry");
-//     PR_INFO("count = %d", count);
+    PR_INFO("entry()");
 
-//     /* must be value/delay pair */
-//     if (count % 2) return (ssize_t)0;
+    switch (cmd) {
+        case IOCTL_RELEASE_POLL:
+            ess_work_struct_wrapper_.poll_enabled = false;
+            wake_up_interruptible(&(ess_work_struct_wrapper_.capture_event_waitqueue));
+            break;
+    }
 
-//     /* cancel timer if active */
-//     hrtimer_cancel(&my_hrt_data_->timer);
-
-//     /* write value and msec sleep count */
-//     PR_INFO("start gpio sequence");
-//     while (counts_remaining) {
-//         PR_INFO("val = %d", (*buff == 0) ? 0 : 1);
-//         gpio_set_value_cansleep(gpio_num_output_, (*buff == 0) ? 0 : 1);
-//         buff++;
-//         mdelay(*buff);
-//         buff++;
-//         counts_remaining -= 2;
-//     }
-
-//     return (ssize_t)(count/2);
-// }
-
-
-// long gpio_irq_demo_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
-// {
-//     long retval = 0;
-
-//     PR_INFO("gpio_irq_demo_ioctl()");
-
-//     switch(cmd) {
-
-//         case ESS_SET_GPIO:
-
-//             PR_INFO("ESS_SET_GPIO_SEQ_NUM");
-//             // cancel timer if active
-//             hrtimer_cancel(&my_hrt_data_->timer);
-
-//             /* set gpo value */
-//             gpio_set_value_cansleep(gpio_num_output_, 1);
-
-//             // TODO have a statefull behavior for handling ESS_DUTY_CYCLE_GPIO mode vs set/get mode
-//             /* signal any blocked poll (select(), poll() or epoll() sys call) */
-//             ess_work_struct_wrapper_.poll_enabled = false;
-//             wake_up_interruptible(&(ess_work_struct_wrapper_.capture_event_waitqueue));
-
-//             break;
-
-//         case ESS_CLR_GPIO:
-
-//             PR_INFO("ESS_CLR_GPIO_SEQ_NUM");
-//             // cancel timer if active
-//             hrtimer_cancel(&my_hrt_data_->timer);
-
-//             /* clear gpo */
-//             gpio_set_value_cansleep(gpio_num_output_, 0);
-
-//             // TODO have a statefull behavior for handling ESS_DUTY_CYCLE_GPIO mode vs set/get mode ... and sync the release of the user space call
-//             /* signal any blocked poll (select(), poll() or epoll() sys call) */
-//             ess_work_struct_wrapper_.poll_enabled = false;
-//             wake_up_interruptible(&(ess_work_struct_wrapper_.capture_event_waitqueue));
-//             break;
-
-//         case ESS_DUTY_CYCLE_GPIO:
-
-//             PR_INFO("ESS_DUTY_CYCLE_GPIO_SEQ_NUM");
-//             PR_INFO("period : %lu msec", arg);
-
-//             if (arg == 0) {
-
-//                 PR_INFO("cancel duty cycle mode");
-//                 if (hrtimer_cancel(&my_hrt_data_->timer)) {
-//                     pr_info("cancelled active timer\n");
-//                 }
-
-//                 ess_work_struct_wrapper_.poll_enabled = false;
-//                 wake_up_interruptible(&(ess_work_struct_wrapper_.capture_event_waitqueue));
-
-//             } else {
-
-//                 my_hrt_data_->period_sec = arg / 1000;
-//                 my_hrt_data_->period_nsec = (arg - my_hrt_data_->period_sec*1000) *1000000;
-//                 PR_INFO("time_per_sec : %ld, time_per_nsec : %lu", my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
-
-//                 ess_work_struct_wrapper_.poll_enabled = true;
-
-//                 my_hrt_data_->period = ktime_set(my_hrt_data_->period_sec, my_hrt_data_->period_nsec);
-//                 // cancel and start new timer at specified period
-//                 hrtimer_cancel(&my_hrt_data_->timer);
-//                 hrtimer_start(&my_hrt_data_->timer, my_hrt_data_->period, HRTIMER_MODE_REL);
-
-//             }
-//             break;
-
-//         default:
-
-//             retval = -EPERM;
-//             break;
-
-//         return retval;
-//     }
-
-//     return retval;
-// }
+    return retval;
+}
 
 
 void gpio_oled_irq_exit(void)
@@ -494,14 +303,6 @@ void gpio_oled_irq_exit(void)
     free_irq(ess_work_struct_wrapper_.button_irq_numbers[ROCKER_W], NULL);
 
     // gpio_unexport(gpio_num_output_);
-
-    // /* timer resources */
-    // PR_INFO("cancel active time");
-    // if (hrtimer_cancel(&my_hrt_data_->timer)) {
-    //     PR_INFO("cancelled active timer");
-    // }
-    // PR_INFO("free timer object\n");
-    // kfree(my_hrt_data_);
 
     /* release workqueue */
     // flush_workqueue(&ess_work_struct_wrapper_.event_work_struct);
@@ -551,10 +352,16 @@ __poll_t gpio_oled_irq_poll(struct file *f, struct poll_table_struct *wait)
     /* validate data ready */
     mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
     if (!empty(&ess_work_struct_wrapper_.event_bulk_data_buffer)) {
-        PR_INFO("POLLIN | POLLRDNORM");
+        // PR_INFO("POLLIN | POLLRDNORM");
         ret_val_mask = POLLIN | POLLRDNORM;
     } else {
-        PR_INFO("poll sleep");
+        if (false == ess_work_struct_wrapper_.poll_enabled) {
+            PR_INFO("poll sleep");
+            ret_val_mask = POLLHUP;
+        } 
+        // else {
+        //     ret_val_mask = POLLIN | POLLRDNORM;
+        // }
     }
     mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
 
@@ -565,12 +372,27 @@ __poll_t gpio_oled_irq_poll(struct file *f, struct poll_table_struct *wait)
 static irq_handler_t gpio_btn_5_irq_handler(unsigned int irq, void* dev_id)
 {
     struct CircularBufferPow2* capture_event_buffer = &ess_work_struct_wrapper_.capture_event_buffer;
-
     static uint64_t counter = 0;
     struct CaptureEvent capture_event;
 
-    PR_INFO("num_irqs_ = %d", ++num_irqs_);
-    PR_ERR("irq %u", irq);
+    static unsigned long last_jiffy = 0;
+    unsigned long current_jiffy;
+    long time_diff;
+    long msec;
+
+    if (!gpio_can_debounce_) {
+        current_jiffy = jiffies;
+        time_diff = (long)current_jiffy - (long)last_jiffy;
+        msec = time_diff * 1000 / HZ;
+
+        if (msec < 20) {
+            PR_ERR("debounce msec: %ld", msec);
+            return (irq_handler_t) IRQ_HANDLED;
+        }
+    }
+
+    // PR_INFO("num_irqs_ = %d", ++num_irqs_);
+    // PR_ERR("irq %u", irq);
 
     capture_event.button_num = BUTTON_5;
 
@@ -587,18 +409,32 @@ static irq_handler_t gpio_btn_5_irq_handler(unsigned int irq, void* dev_id)
 static irq_handler_t gpio_btn_6_irq_handler(unsigned int irq, void* dev_id)
 {
     struct CircularBufferPow2* capture_event_buffer = &ess_work_struct_wrapper_.capture_event_buffer;
-
     static uint64_t counter = 0;
     struct CaptureEvent capture_event;
 
-    PR_ERR("ess_work_struct_wrapper_ @ 0x%p", dev_id);
-    PR_INFO("entry");
-    PR_INFO("num_irqs_ = %d", ++num_irqs_);
-    PR_ERR("irq %u", irq);
+    static unsigned long last_jiffy = 0;
+    unsigned long current_jiffy;
+    long time_diff;
+    long msec;
+
+    if (!gpio_can_debounce_) {
+        current_jiffy = jiffies;
+        time_diff = (long)current_jiffy - (long)last_jiffy;
+        msec = time_diff * 1000 / HZ;
+
+        if (msec < 20) {
+            PR_ERR("debounce msec: %ld", msec);
+            return (irq_handler_t) IRQ_HANDLED;
+        }
+    }
+
+    // PR_INFO("num_irqs_ = %d", ++num_irqs_);
+    // PR_ERR("irq %u", irq);
 
     /* access capture_event_buffer */
+    capture_event.button_num = BUTTON_6;
     capture_event.event = ++counter;
-    PR_INFO("pushing event %lld", capture_event.event);
+    PR_INFO("pushing event %llu", capture_event.event);
     push(capture_event_buffer, &capture_event);
 
     schedule_work(&ess_work_struct_wrapper_.event_work_struct);
@@ -607,45 +443,70 @@ static irq_handler_t gpio_btn_6_irq_handler(unsigned int irq, void* dev_id)
 }
 
 
-static irq_handler_t gpio_rocker_4_irq_handler(unsigned int irq, void* dev_id)
+static irq_handler_t gpio_rocker_irq_handler(unsigned int irq, void* dev_id)
 {
-    PR_INFO("depress rocker");
-    return (irq_handler_t) IRQ_HANDLED;
-}
-static irq_handler_t gpio_rocker_17_irq_handler(unsigned int irq, void* dev_id)
-{
-    PR_INFO("north rocker");
-    return (irq_handler_t) IRQ_HANDLED;
-}
-static irq_handler_t gpio_rocker_22_irq_handler(unsigned int irq, void* dev_id)
-{
-    PR_INFO("south rocker");
-    return (irq_handler_t) IRQ_HANDLED;
-}
-static irq_handler_t gpio_rocker_23_irq_handler(unsigned int irq, void* dev_id)
-{
-    PR_INFO("east rocker");
-    return (irq_handler_t) IRQ_HANDLED;
-}
-static irq_handler_t gpio_rocker_27_irq_handler(unsigned int irq, void* dev_id)
-{
-    PR_INFO("west rocker");
+    struct CircularBufferPow2* capture_event_buffer = &ess_work_struct_wrapper_.capture_event_buffer;
+    static uint64_t counter = 0;
+    struct CaptureEvent capture_event;
+
+    static unsigned long last_jiffy = 0;
+    unsigned long current_jiffy;
+    long time_diff;
+    long msec;
+
+    if (!gpio_can_debounce_) {
+        current_jiffy = jiffies;
+        time_diff = (long)current_jiffy - (long)last_jiffy;
+        msec = time_diff * 1000 / HZ;
+
+        if (msec < 20) {
+            PR_ERR("debounce msec: %ld", msec);
+            return (irq_handler_t) IRQ_HANDLED;
+        }
+    }
+
+    PR_INFO("msec: %ld", msec);
+    last_jiffy = current_jiffy;
+
+    // PR_INFO("num_irqs_ = %d", ++num_irqs_);
+    // PR_ERR("irq %u", irq);
+
+    if (irq == rocker_4_irq_number_) {
+        capture_event.button_num = ROCKER_D;
+        PR_INFO("%s", rocker_4_);
+    } else if (irq == rocker_17_irq_number_) {
+        capture_event.button_num = ROCKER_N;
+        PR_INFO("%s", rocker_17_);
+    } else if (irq == rocker_22_irq_number_) {
+        capture_event.button_num = ROCKER_S;
+        PR_INFO("%s", rocker_22_);
+    } else if (irq == rocker_23_irq_number_) {
+        capture_event.button_num = ROCKER_E;
+        PR_INFO("%s", rocker_23_);
+    } else if (irq == rocker_27_irq_number_) {
+        capture_event.button_num = ROCKER_W;
+        PR_INFO("%s", rocker_27_);
+    }
+
+    /* access capture_event_buffer */
+    capture_event.event = ++counter;
+    // PR_INFO("pushing event %llu", capture_event.event);
+    push(capture_event_buffer, &capture_event);
+
+    schedule_work(&ess_work_struct_wrapper_.event_work_struct);
+
     return (irq_handler_t) IRQ_HANDLED;
 }
 
 
 /* work queue pulls from event list and operates under mutex control with ess queue object */
-/* TODO investigate threaded processing to process work events */
+// TODO investigate threaded processing to process work events
 static void do_work(struct work_struct* work)
 {
     struct ESSWorkStructWrapper* ess_work_struct_wrapper;
     struct CaptureEvent* capture_event_ref;
     struct CaptureEvent capture_event;
-    // unsigned long flags;
     uint64_t idx;
-    static int test_entry = 0;
-
-    PR_ERR("entry: %d", ++test_entry);
 
     ess_work_struct_wrapper = container_of(work, struct ESSWorkStructWrapper, event_work_struct);
 
@@ -653,15 +514,15 @@ static void do_work(struct work_struct* work)
     /* access capture_event_buffer */
     while (NULL != (capture_event_ref = front(&ess_work_struct_wrapper->capture_event_buffer))) {
         /* copy event */
-        PR_INFO("element_size : %zd", ess_work_struct_wrapper->capture_event_buffer.element_size);
+        // PR_INFO("element_size : %zd", ess_work_struct_wrapper->capture_event_buffer.element_size);
         memcpy(&capture_event, capture_event_ref, ess_work_struct_wrapper->capture_event_buffer.element_size);
         pop(&ess_work_struct_wrapper->capture_event_buffer);
-        PR_INFO("button_num : %d, %lld", capture_event.button_num, capture_event.event);
+        PR_INFO("button_num : %d, num irqs: %llu", capture_event.button_num, capture_event.event);
 
         /* access event_bulk_data_buffer, shared by poll and read() */
         // TODO investigate interruptable version
         mutex_lock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
-        PR_INFO("event_bulk_data_mtx locked");
+        // PR_INFO("event_bulk_data_mtx locked");
         if (space(&ess_work_struct_wrapper_.event_bulk_data_buffer)) {
             if (NULL != capture_event_ref) {
                 /* capture event obtained */
@@ -674,12 +535,12 @@ static void do_work(struct work_struct* work)
 
                 if (0 == push(&ess_work_struct_wrapper_.event_bulk_data_buffer, &event_bulk_data)) {
                     /* signal the blocked poll (select(), poll() or epoll() sys call) */
-                    PR_INFO("wake_up_interruptable()");
+                    PR_ERR("wake_up_interruptable()");
                     wake_up_interruptible(&(ess_work_struct_wrapper->capture_event_waitqueue));
                 }
             }
         }
         mutex_unlock(&ess_work_struct_wrapper_.event_bulk_data_mtx);
-        PR_INFO("event_bulk_data_mtx unlocked");
+        // PR_INFO("event_bulk_data_mtx unlocked");
     }
 }

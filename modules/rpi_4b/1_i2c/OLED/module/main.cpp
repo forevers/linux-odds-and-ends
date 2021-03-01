@@ -7,8 +7,6 @@
 // export LD=$TOOL_PREFIX-ld
 // export CCFLAGS="-march=armv4"
 // g++ -g -O0 -std=c++17 -ggdb -lpthread -o i2c_oled_test main.cpp
-// rpi@192.168.1.15
-// scp i2c_oled_test pi@192.168.1.15:/home/pi/projects/oled/app
 
 #include <climits>
 #include <errno.h>
@@ -81,12 +79,114 @@ public:
     /* no Assignment operator */
     ButtonProcessing& operator=(const ButtonProcessing&) = delete;
 
+    void PixelDown()
+    {
+        if (y_cur_ < 63) {
+            uint8_t cmd_sequence[3];
+            y_cur_++;
+            cmd_sequence[0] = CMD_SET_PIXEL;
+            cmd_sequence[1] = x_cur_;
+            cmd_sequence[2] = y_cur_;
+            write(fd_, cmd_sequence, 3);
+        }
+    }
+    
+    void PixelUp()
+    {
+        if (x_cur_ > 0) {
+            uint8_t cmd_sequence[3];
+            y_cur_--;
+            cmd_sequence[0] = CMD_SET_PIXEL;
+            cmd_sequence[1] = x_cur_;
+            cmd_sequence[2] = y_cur_;
+            write(fd_, cmd_sequence, 3);
+        }
+    }
+        
+    void PixelRight()
+    {               
+        if (x_cur_ < 127) {
+            uint8_t cmd_sequence[3];
+            x_cur_++;
+            cmd_sequence[0] = CMD_SET_PIXEL;
+            cmd_sequence[1] = x_cur_;
+            cmd_sequence[2] = y_cur_;
+            write(fd_, cmd_sequence, 3);
+        }
+    }
+    
+    void PixelLeft()
+    {
+        if (x_cur_ > 0) {
+            uint8_t cmd_sequence[3];
+            x_cur_--;
+            cmd_sequence[0] = CMD_SET_PIXEL;
+            cmd_sequence[1] = x_cur_;
+            cmd_sequence[2] = y_cur_;
+            write(fd_, cmd_sequence, 3);
+        }
+    }
+    
+    void ToggleFill()
+    {
+        if (oled_filled_) {
+            cout<<"blank oled"<<endl;
+            oled_filled_ = false;
+            ioctl(fd_, IOCTL_CLEAR_BUFFER);
+        } else {
+            cout<<"fill oled"<<endl;
+            oled_filled_ = true;
+            ioctl(fd_, IOCTL_FILL_BUFFER);
+        }
+    }  
+    
+    /* lines from cur position to left and top edges */
+    void LineToTopLeft()
+    {
+        uint8_t cmd_sequence[4];
+        cmd_sequence[0] = CMD_H_LINE;
+        cmd_sequence[1] = 0;
+        cmd_sequence[2] = y_cur_;
+        cmd_sequence[3] = x_cur_;
+        write(fd_, cmd_sequence, sizeof(cmd_sequence));
+        cmd_sequence[0] = CMD_V_LINE;
+        cmd_sequence[1] = x_cur_;
+        cmd_sequence[2] = 0;
+        cmd_sequence[3] = y_cur_;
+        write(fd_, cmd_sequence, sizeof(cmd_sequence));
+    }
+    
+    /* rectangle from cur position to uppper left corner */
+    void RectToTopLeft()
+    {
+        uint8_t cmd_sequence[5];
+
+        if (oled_rect_filled_) {
+            cout<<"oled rectangle blanked"<<endl;
+            oled_rect_filled_ = false;
+            cmd_sequence[0] = CMD_RECT_CLEAR;
+            cmd_sequence[1] = 0;
+            cmd_sequence[2] = 0;
+            cmd_sequence[3] = x_cur_;
+            cmd_sequence[4] = y_cur_;
+            write(fd_, cmd_sequence, sizeof(cmd_sequence));
+        } else {
+            cout<<"oled retangle filled"<<endl;
+            oled_rect_filled_ = true;
+            cmd_sequence[0] = CMD_RECT_FILL;
+            cmd_sequence[1] = 0;
+            cmd_sequence[2] = 0;
+            cmd_sequence[3] = x_cur_;
+            cmd_sequence[4] = y_cur_;
+            write(fd_, cmd_sequence, sizeof(cmd_sequence));
+        }
+    }
+                
+private:
+
     uint8_t x_cur_;
     uint8_t y_cur_;
 
-private:
-
-    // PollMode poll_mode_;
 
     /* init the event poll epoll file descriptor */
     int EpollInit(int epoll_size_approximation)
@@ -114,13 +214,13 @@ private:
 
     void Run(std::string command)
     {
-        cout<<"DutyCycle::Run() entry"<<endl;
+        cout<<"Run() entry"<<endl;
 
         int retval;
 
         while (enabled_) {
 
-            sleep(1);
+            //sleep(1);
 
             // two events
             int max_number_events = 2;
@@ -132,17 +232,64 @@ private:
 
             // blocking epoll call
             if (0 < (num_events_received = epoll_wait(ep_fd_, epoll_events, max_number_events, -1))) {
-
                 for (int i = 0; i < num_events_received; i++) {
 
-                    cout<<"event : "<<epoll_events[i].events<<" on fd = "<<epoll_events[i].data.fd<<endl;
+                    //cout<<"event : "<<epoll_events[i].events<<" on fd = "<<epoll_events[i].data.fd<<endl;
 
                     if (fd_ == epoll_events[i].data.fd) {
+                        bool read_ok = true;
                         /* capture event bulk data */
                         struct EventBulkData event_bulk_data;
-                        while (sizeof(struct EventBulkData) == read(fd_, &event_bulk_data, sizeof(struct EventBulkData))) {
+                        ssize_t remaining = sizeof(struct EventBulkData); 
+                        uint8_t* buffer = reinterpret_cast<uint8_t*>(&event_bulk_data); 
+                        //while (sizeof(struct EventBulkData) == read(fd_, &event_bulk_data, sizeof(struct EventBulkData))) {
+                        //    uint64_t button_number = event_bulk_data.capture_event.button_num;
+                        //    uint64_t event_number = event_bulk_data.capture_event.event;
+                        //    cout<<"button: "<<button_number<<", event number : "<<event_number<<endl;
+                        //}
+                        ssize_t ret;
+                        while (remaining != 0 && ((ret = read(fd_, buffer, remaining)) != 0)) {
+                            if (ret > 0) {
+                                remaining -= ret;
+                                buffer += ret;
+                            } else {
+                                if (errno == EINTR) continue;
+                                cout<<"read error: "<<ret<<endl;
+                                read_ok = false;
+                                break;
+                            }
+                        }
+                        if (read_ok) {
+                            uint64_t button_number = event_bulk_data.capture_event.button_num;
                             uint64_t event_number = event_bulk_data.capture_event.event;
-                            cout<<"event number : "<<event_number<<endl;
+                            cout<<"button: "<<button_number<<", event number : "<<event_number<<endl;
+                            
+                            switch(button_number) {
+                                case(BUTTON_5):
+                                    LineToTopLeft();
+                                    break;
+                                case(BUTTON_6):
+                                    RectToTopLeft();
+                                    break;
+                                case(ROCKER_D):
+                                    ToggleFill();
+                                case(ROCKER_N):
+                                    PixelUp();
+                                    break;
+                                case(ROCKER_S):
+                                    PixelDown();
+                                    break;
+                                case(ROCKER_E):
+                                    PixelRight();
+                                    break;
+                                case(ROCKER_W):
+                                    PixelLeft();
+                                    break;
+                                default:
+                                    break;
+                            }
+                            
+                            if (button_number == ROCKER_S) PixelDown();
                         }
                     }
                 }
@@ -153,11 +300,11 @@ private:
 
         cout<<"thread "<<name_<<" exit"<<endl;
     }
-
+                
     std::thread thread_;
     std::string name_;
 
-    /* file descriptor to release any blocking poll() epoll() or select() calls */
+    /* file descriptor to release blocking epoll() calls */
     int fd_;
     /* epoll file descriptor */
     int ep_fd_;
@@ -176,7 +323,6 @@ void print_key_processing()
     cout<<" Select one of the following modes using the keyboard"<<endl;
     cout<<" All modes allow value iteration using the up/down keys"<<endl;
     cout<<endl;
-
     cout<<"  q - quit"<<endl;
     cout<<"  e - toggle oled enable"<<endl;
     cout<<"  f - toggle fill frame buffer"<<endl;
@@ -196,15 +342,6 @@ static void process_key_entry(int fd)
 {
     int ch;
     struct termios t;
-    unsigned long duty_cycle_msec = 1000;
-    uint8_t short_period_msec = 0x3F;
-    uint8_t long_period_msec = 0xFF;
-    uint8_t gpio_burst_sequence[] = {
-        0x00, short_period_msec,
-        0xFF, short_period_msec,
-        0x00, short_period_msec,
-        0xFF, long_period_msec,
-        0x00, short_period_msec};
 
     shared_ptr<ButtonProcessing> button_processing = std::make_shared<ButtonProcessing>("test", fd);
 
@@ -238,56 +375,17 @@ static void process_key_entry(int fd)
             }
 
             case 'f': {
-                if (button_processing->oled_filled_) {
-                    cout<<"blank oled"<<endl;
-                    button_processing->oled_filled_ = false;
-                    ioctl(fd, IOCTL_CLEAR_BUFFER);
-                } else {
-                    cout<<"fill oled"<<endl;
-                    button_processing->oled_filled_ = true;
-                    ioctl(fd, IOCTL_FILL_BUFFER);
-                }
+                button_processing->ToggleFill();
                 break;
             }
 
             case 'l': {
-                /* lines from cur position to left and top edges */
-                uint8_t cmd_sequence[4];
-                cmd_sequence[0] = CMD_H_LINE;
-                cmd_sequence[1] = 0;
-                cmd_sequence[2] = button_processing->y_cur_;
-                cmd_sequence[3] = button_processing->x_cur_;
-                write(fd, cmd_sequence, sizeof(cmd_sequence));
-                cmd_sequence[0] = CMD_V_LINE;
-                cmd_sequence[1] = button_processing->x_cur_;
-                cmd_sequence[2] = 0;
-                cmd_sequence[3] = button_processing->y_cur_;
-                write(fd, cmd_sequence, sizeof(cmd_sequence));
+                button_processing->LineToTopLeft();
                 break;
             }
 
             case 'r': {
-                uint8_t cmd_sequence[5];
-                /* rectangle from cur position to uppper left corner */
-                if (button_processing->oled_rect_filled_) {
-                    cout<<"oled rectangle blanked"<<endl;
-                    button_processing->oled_rect_filled_ = false;
-                    cmd_sequence[0] = CMD_RECT_CLEAR;
-                    cmd_sequence[1] = 0;
-                    cmd_sequence[2] = 0;
-                    cmd_sequence[3] = button_processing->x_cur_;
-                    cmd_sequence[4] = button_processing->y_cur_;
-                    write(fd, cmd_sequence, sizeof(cmd_sequence));
-                } else {
-                    cout<<"oled retangle filled"<<endl;
-                    button_processing->oled_rect_filled_ = true;
-                    cmd_sequence[0] = CMD_RECT_FILL;
-                    cmd_sequence[1] = 0;
-                    cmd_sequence[2] = 0;
-                    cmd_sequence[3] = button_processing->x_cur_;
-                    cmd_sequence[4] = button_processing->y_cur_;
-                    write(fd, cmd_sequence, sizeof(cmd_sequence));
-                }
+                button_processing->RectToTopLeft();
                 break;
             }
 
@@ -297,44 +395,16 @@ static void process_key_entry(int fd)
                     int key_val = getchar();
                     if (66 == key_val) {
                         // down arrow
-                        if (button_processing->y_cur_ < 63) {
-                            uint8_t cmd_sequence[3];
-                            button_processing->y_cur_++;
-                            cmd_sequence[0] = CMD_SET_PIXEL;
-                            cmd_sequence[1] = button_processing->x_cur_;
-                            cmd_sequence[2] = button_processing->y_cur_;
-                            int bytes = write(fd, cmd_sequence, 3);
-                        }
+                        button_processing->PixelDown();
                     } else if (65 == key_val) {
                         /* up arrow */
-                        if (button_processing->x_cur_ > 0) {
-                            uint8_t cmd_sequence[3];
-                            button_processing->y_cur_--;
-                            cmd_sequence[0] = CMD_SET_PIXEL;
-                            cmd_sequence[1] = button_processing->x_cur_;
-                            cmd_sequence[2] = button_processing->y_cur_;
-                            int bytes = write(fd, cmd_sequence, 3);
-                        }
+                        button_processing->PixelUp();
                     } else if (67 == key_val) {
                         /* right arrow */
-                        if (button_processing->x_cur_ < 127) {
-                            uint8_t cmd_sequence[3];
-                            button_processing->x_cur_++;
-                            cmd_sequence[0] = CMD_SET_PIXEL;
-                            cmd_sequence[1] = button_processing->x_cur_;
-                            cmd_sequence[2] = button_processing->y_cur_;
-                            int bytes = write(fd, cmd_sequence, 3);
-                        }
+                        button_processing->PixelRight();
                     } else if (68 == key_val) {
                         /* left arrow */
-                        if (button_processing->x_cur_ > 0) {
-                            uint8_t cmd_sequence[3];
-                            button_processing->x_cur_--;
-                            cmd_sequence[0] = CMD_SET_PIXEL;
-                            cmd_sequence[1] = button_processing->x_cur_;
-                            cmd_sequence[2] = button_processing->y_cur_;
-                            int bytes = write(fd, cmd_sequence, 3);
-                        }
+                        button_processing->PixelLeft();
                     } else {
                         break;
                     }
