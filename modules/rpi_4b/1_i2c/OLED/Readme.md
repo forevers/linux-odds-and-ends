@@ -164,18 +164,33 @@
         - https://www.raspberrypi.org/forums/viewtopic.php?f=107&t=161771&p1051588#p1051588
         "-W no-unit_address_vs_reg"
 - compile
-    - dtc -W no-unit_address_vs_reg -I dts -O dtb -o ess-i2c-oled.dtbo ess-i2c-oled-overlay.dts
+    ```console
+    $ dtc -W no-unit_address_vs_reg -I dts -O dtb -o ess-i2c-oled.dtbo ess-i2c-oled-overlay.dts
+    ```
 
 - dump dtb interrogation
-    - $ fdtdump ess-i2c-oled.dtbo
+    ```console
+    $ fdtdump ess-i2c-oled.dtbo
+    ```
 
 - copy dtbo into rpi /boot/overlays directory
-    - $ scp ess-i2c-oled.dtbo pi@xxx.xxx.xxx.xxx:/home/pi
-    - pi@raspberrypi:~ sudo mv ess-i2c-oled.dtbo /boot/overlays
+    ```console
+    $ scp ess-i2c-oled.dtbo pi@xxx.xxx.xxx.xxx:/home/pi
+    ```
+    ```console
+    pi@raspberrypi:~ sudo chown root: ess-i2c-oled.dtbo
+    pi@raspberrypi:~ sudo chmod 755 ess-i2c-oled.dtbo
+    pi@raspberrypi:~ sudo mv ess-i2c-oled.dtbo /boot/overlays
+    ```
     - edit /boot/config.txt
-        -
+        ```console
+        # ess oled bonnet driver
+        dtdebug=1
+        dtoverlay=ess-i2c-oled
+        ```
 
     - reboot
+
     - verify overlay loaded
         ```console
         $ pi@raspberrypi:~$ sudo vcdbg log msg
@@ -205,3 +220,5 @@
         $ pi@raspberrypi:~ $ cat /proc/device-tree/soc/i2c@7e804000/ess-oled@3c/compatible 
         ess,ess-oled
         ```
+# TODO
+- locate dts overlay in directory to allow includes

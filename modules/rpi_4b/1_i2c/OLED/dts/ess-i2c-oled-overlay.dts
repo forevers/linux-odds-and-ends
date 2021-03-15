@@ -10,20 +10,30 @@
         target = <&i2c_arm>;
 
         __overlay__ {
+            // 1 32-bit cell represents the address
             #address-cells = <1>;
+            // size-cells is 0 for non memory mapped devices
             #size-cells = <0>;
             status = "okay";
 
             ess-oled@3c {
                 compatible = "ess,ess-oled";
                 status = "okay";
+                // TODO don't need this unless a child node of ess-oled@3c is to be created
                 #address-cells = <1>;
+                // TODO don't need this unless a child node of ess-oled@3c is to be created
                 #size-cells = <0>;
                 reg = <0x3c>;
                 height = <64>;
                 width = <128>;
                 page-offset = <0>;
                 prechargep2 = <15>;
+
+                // btn5irq_gpios = < &gpio 0x05 GPIO_ACTIVE_LOW >;
+                btn5irq-gpios = < &gpio 0x05 0x00 >;
+                btn6irq-gpios = < &gpio 0x06 0x00 >;
+                rockerirq-gpios = < &gpio 4 0x00 >, < &gpio 17 0x00 >, < &gpio 22 0x00 >, < &gpio 23 0x00 >, < &gpio 27 0x00 >;
+
                 // SSD1306 RST pin is driven by rpi bus vcc during board power-up
                 // SDD1305 VBAT/VDD/VCC/VLSS, and BS1/I2C_SDA (i2c selection) pins are driven by rpi bus vcc during board power-up
                 test_ref = <&test_label>;
@@ -52,4 +62,5 @@
             //};
         };
     };
+
 };

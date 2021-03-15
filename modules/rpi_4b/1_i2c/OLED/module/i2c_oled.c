@@ -69,6 +69,7 @@
 #include "i2c_oled_global.h"
 #include "util.h"
 
+#include <linux/gpio/consumer.h>
 
 typedef struct ssd1305_data {
     __u8* buffer;               /* raw display data + byte 0 prefix of 0x40 */
@@ -374,7 +375,10 @@ static int ess_oled_probe(struct i2c_client* client, const struct i2c_device_id*
     match = of_match_device(ess_oled_of_match, &client->dev);
     if (match) {
         PR_INFO("of match found");
-        /* device tree code here */
+        if (gpio_oled_probe(&client->dev)) {
+            PR_ERR("gpio_oled_probe() failure");
+            return -ENXIO;
+        }
     } else {
         PR_INFO("of match not found");
         // TODO support non dts driver version
@@ -423,7 +427,6 @@ static int ess_oled_probe(struct i2c_client* client, const struct i2c_device_id*
 
     /* OLED off */
     if ((ret = write_cmd(client, SET_DISP_OFF)) < 0) {
-    // if ((ret = i2c_smbus_write_byte(client, SET_DISP_OFF)) < 0) {
         PR_ERR("write_cmd SET_DISP_OFF failure");
         return ret;
     }
@@ -575,14 +578,16 @@ static int ess_oled_remove(struct i2c_client *client)
 {
     ess_ssd1305_oled* ssd1305_oled;
 
-    PR_INFO("ess_oled_remove() entry");
+    PR_INFO("entry");
 
     /* oled device data */
     ssd1305_oled = i2c_get_clientdata(client);
     kfree(ssd1305_oled->oled_data.buffer);
     kfree(ssd1305_oled);
 
-    PR_INFO("ess_oled_remove() exit");
+    gpio_oled_remove(&client->dev);
+
+    PR_INFO("exit");
     return 0;
 }
 
@@ -595,7 +600,6 @@ ssize_t ess_oled_read(struct file *f, char __user *buff, size_t count, loff_t *p
     size = gpio_oled_irq_read(f, buff, count, pos);
     PR_INFO("exit");
     return size;
-    //return 0;
 }
 
 
@@ -613,8 +617,8 @@ __poll_t ess_oled_poll(struct file *f, struct poll_table_struct *wait)
 ssize_t ess_oled_write(struct file *f, const char __user *buff, size_t count, loff_t *pos)
 {
     int ret;
-    // PR_INFO("entry");
 
+    // PR_INFO("entry");
     // PR_INFO("buff[0] = %x, count = %lx", buff[0], count);
 
     /* single byte write are REG writes */
@@ -789,7 +793,7 @@ static struct i2c_driver ess_oled_driver = {
 
 #if defined(INIT_EXIT_MACRO)
 /* creates init/exit functions 
-   platform_driver_register() and platform_driver_un register() automatically called */
+   platform_driver_register() and platform_driver_unregister() automatically called */
 module_i2c_driver(ess_oled_driver);
 #else
 // static int __init ess_oled_init(void)
@@ -813,9 +817,11 @@ int ess_oled_init(void)
 // static void __exit ess_oled_cleanup(void)
 void ess_oled_cleanup(void)
 {
-    PR_INFO("ess_oled_cleanup() entry");
+    PR_INFO("entry");
+
     i2c_del_driver(&ess_oled_driver);
     gpio_oled_irq_exit();
+    PR_INFO("exit");
 }
 // module_exit(ess_oled_cleanup);
 #endif

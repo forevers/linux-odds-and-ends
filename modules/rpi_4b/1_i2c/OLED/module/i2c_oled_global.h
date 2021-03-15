@@ -44,13 +44,15 @@ extern "C" {
 #endif
 
 /* button enumeration */
-#define BUTTON_5 0
-#define BUTTON_6 1
-#define ROCKER_D 2
-#define ROCKER_N 3
-#define ROCKER_S 4
-#define ROCKER_E 6
-#define ROCKER_W 7
+enum GPIO {
+    BUTTON_5,
+    BUTTON_6,
+    ROCKER_D,
+    ROCKER_N,
+    ROCKER_S,
+    ROCKER_E,
+    ROCKER_W
+};
 
 /* capture event metadata */
 struct CaptureEvent {
