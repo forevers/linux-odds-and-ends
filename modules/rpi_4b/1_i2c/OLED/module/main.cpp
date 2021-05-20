@@ -1,11 +1,4 @@
 // native compiler options
-// export TOOL_PREFIX=/mnt/data/projects/rpi/clones/tools/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/bin/arm-bcm2708hardfp-linux-gnueabi
-// export CXX=$TOOL_PREFIX-g++
-// export AR=$TOOL_PREFIX-ar
-// export RANLIB=$TOOL_PREFIX-ranlib
-// export CC=$TOOL_PREFIX-gcc
-// export LD=$TOOL_PREFIX-ld
-// export CCFLAGS="-march=armv4"
 // g++ -g -O0 -std=c++17 -ggdb -lpthread -o i2c_oled_test main.cpp
 
 #include <climits>

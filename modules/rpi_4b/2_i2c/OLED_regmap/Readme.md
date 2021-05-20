@@ -1,4 +1,4 @@
-# I2C/GPIO OLED driver and Test Application
+# I2C Regmap/GPIO OLED driver and Test Application
 
 This project provides a fundamental rpi 4 display driver for an adafruit 128x64 oled bonnet.
 
@@ -7,11 +7,9 @@ Components:
     - i2c based (OLED controller also supports spi)
     - gpios and rocker switch
 - dts overlay
-- i2c platform driver
+- i2c Regmap driver
 - GPIO irq bottom half work queue processing
 - user space test app supports ioctl command set
-
-[driver and test app demo video](https://www.youtube.com/watch?v=BxtBrntPAaI&feature=youtu.be)
 
 
 ## driver
@@ -24,7 +22,7 @@ host$ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -C <path to built kernel>
 
 Transfer driver to target
 ```console
-host$ scp ess_oled.ko pi@<pi ip addr>:/home/pi/projects/oled/driver
+host$ scp ess_oled_regmap.ko pi@<pi ip addr>:/home/pi/projects/oled/driver
 ```
 
 ## dts overlay
@@ -62,9 +60,9 @@ pi@raspberrypi: g++ -g -O0 -std=c++17 -ggdb -lpthread -o i2c_oled_test main.cpp
 Load, test, unload module
 ```console
 pi@raspberrypi: dmesg -wH in separate shell
-pi@raspberrypi: sudo insmod ess_oled.ko
+pi@raspberrypi: sudo insmod ess_oled_regmap.ko
 pi@raspberrypi: i2c_oled_test
-pi@raspberrypi: sudo rmmod ess_oled.ko
+pi@raspberrypi: sudo rmmod ess_oled_regmap.ko
 ```
 
 ### detailed docs
