@@ -6,9 +6,6 @@
 
 FROM ubuntu:18.04
 
-#LABEL com.mitchallen.pi-cross-compile="{\"Description\":\"Cross Compile for Raspberry Pi\",\"Usage\":\"docker run -it -v ~/myprojects/mybuild:/build mitchallen/pi-cross-compile\",\"Version\":\"0.1.0\"}"
-
-#RUN apt-get update && apt-get install -y git && apt-get install -y build-essential
 RUN apt-get update && apt-get install -y -q \
  git \
  build-essential \

@@ -1,0 +1,18 @@
+// iio moc configuration
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2711";
+
+    fragment@0 {
+        target = <&soc>;
+        __overlay__ {
+            ess-iio-moc {
+                compatible = "ess,ess-iio-moc";
+                status = "okay";
+            };
+        };
+    };
+
+};
