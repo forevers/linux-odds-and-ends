@@ -1,3 +1,4 @@
+#include <linux/bits.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
 #include <linux/iio/events.h>
@@ -28,19 +29,17 @@
     $ cat /proc/kallsyms | grep iio_device_register
     $ sudo modprobe industrialio
     // now it is present and insmod runs without error but nothing under /sys/bus/iio/devices and no probe prints
-    // Q: do I need dts for probe designs?
     // notes:
     $ cat /lib/modules/<version/modules.dep had a module dependency list ... probably part of a formal make install
 
     $ dtc -W no-unit_address_vs_reg -I dts -O dtb -o ess-iio-moc.dtbo ess-iio-moc-overlay.dts
 
     // https://stackoverflow.com/questions/34800731/module-not-found-when-i-do-a-modprobe
-    // also placed ko in /lib/modules/5.4.77.-v8+/extra, ran sudo depmod, then sudo modprobe ess_iio_moc,
-    //    and still no probe prints
+    // also placed ko in /lib/modules/5.4.77.-v8+/extra, ran sudo depmod, then sudo modprobe ess_iio_moc
 */
 
 #define INIT_EXIT_MACRO
-// #define USE_TRIGGER
+#define USE_TRIGGER
 
 static int
 moc_read_raw(
@@ -58,16 +57,48 @@ moc_write_raw(
     int val2,
     long mask);
 
-/* see include/uapi/linux/iio/types.h for .type iio_chan_type enumeration */
-#define MOC_VOLTAGE_CHANNEL(num) \
+#define MOC_DATA_SHIFT  2
+
+/*  .type = IIO_VOLTAGE - "voltage" used in sysfs name
+    .output - 1 output ("out" used is sysfs name), 0 input ("in" used is sysfs name)
+    .address -
+    .indexed = 1 - .channel used in sysfs name
+    .channel - used in sysfs name
+    scan_type - signed, 
+                6 valid data bits in 8 bit payload
+                2 bit shits required
+
+    see include/uapi/linux/iio/types.h for .type iio_chan_type enumeration 
+*/
+#if defined(USE_TRIGGER)
+#define MOC_VOLTAGE_CHANNEL(index, is_output) { \
+    .type = IIO_VOLTAGE, \
+    .output = is_output, \
+    .address = (index), \
+    .indexed = 1, \
+    .channel = (index), \
+    .info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | BIT(IIO_CHAN_INFO_SCALE), \
+    .scan_index = index, \
+    .scan_type = { \
+        .sign = 's', \
+        .realbits = 6, \
+        .storagebits = 8, \
+        .shift = MOC_DATA_SHIFT, \
+        .endianness = IIO_CPU, \
+    }, \
+}
+#else
+#define MOC_VOLTAGE_CHANNEL(index) \
     { \
         .type = IIO_VOLTAGE, \
+        .address = (index), \
         .indexed = 1, \
-        .channel = (num), \
-        .address = (num), \
+        .channel = (index), \
         .info_mask_separate = BIT(IIO_CHAN_INFO_RAW), \
         .info_mask_shared_by_type = BIT(IIO_CHAN_INFO_SCALE) \
     }
+#endif
+
 
 struct private_data {
     int foo;
@@ -80,10 +111,10 @@ struct private_data {
 };
 
 static const struct iio_chan_spec moc_channels[] = {
-    MOC_VOLTAGE_CHANNEL(0),
-    MOC_VOLTAGE_CHANNEL(1),
-    MOC_VOLTAGE_CHANNEL(2),
-    MOC_VOLTAGE_CHANNEL(3),
+    MOC_VOLTAGE_CHANNEL(0, 0),
+    MOC_VOLTAGE_CHANNEL(1, 0),
+    MOC_VOLTAGE_CHANNEL(2, 0),
+    MOC_VOLTAGE_CHANNEL(3, 0),
 #if defined(USE_TRIGGER)
     IIO_CHAN_SOFT_TIMESTAMP(4),
 #endif
@@ -97,6 +128,12 @@ static const struct iio_info moc_iio_info = {
 #if defined(USE_TRIGGER)
 static irqreturn_t moc_trigger_handler(int, void *);
 #endif
+
+/* chanel voltage ranges */
+static const int moc_range[][2] = {
+	{0, 250000}, {1, 500000}, {2, 750000}, {3, 000000},
+};
+
 
 static int
 moc_iio_probe(struct platform_device *pdev)
@@ -134,6 +171,7 @@ moc_iio_probe(struct platform_device *pdev)
     indio_dev->modes = INDIO_DIRECT_MODE;
     indio_dev->channels = moc_channels;
     indio_dev->num_channels = ARRAY_SIZE(moc_channels);
+    /* 4 moc channel available */
     indio_dev->available_scan_masks = (const unsigned long *)0xF;
 
 #if defined(USE_TRIGGER)
@@ -144,16 +182,21 @@ moc_iio_probe(struct platform_device *pdev)
             moc_trigger_handler,
             NULL))) {
         dev_err(&pdev->dev, "moc iio_triggered_buffer_setup() failure");
-
-        /* free iio device memory */
-        iio_device_free(indio_dev);
         return ret;
     }
-    PR_INFO("pose iio_triggered_buffer_setup()");
+    PR_INFO("post iio_triggered_buffer_setup()");
 #endif
 
     /* register device with iio subsystem */
-    iio_device_register(indio_dev);
+    PR_INFO("pre iio_device_register()");
+    if (0 != (ret = iio_device_register(indio_dev))) {
+        dev_err(&pdev->dev, "moc iio_device_register() failure: %d", ret);
+
+        /* free iio device memory */
+        iio_triggered_buffer_cleanup(indio_dev);
+        return ret;
+    }
+    PR_INFO("pre platform_set_drvdata()");
     platform_set_drvdata(pdev, indio_dev);
 
     PR_INFO("exit");
@@ -172,28 +215,23 @@ moc_read_raw(
     long mask)
 {
 #if defined(USE_TRIGGER)
-    // int ret;
-    // u8 range_idx;
     struct private_data *data = iio_priv(indio_dev);
+
+    PR_INFO("entry");
 
     switch (mask) {
     case IIO_CHAN_INFO_RAW:
-        // ret = bma220_read_reg(data->spi_device, chan->address);
-        // if (ret < 0)
-        // 	return -EINVAL;
-        // *val = sign_extend32(ret >> BMA220_DATA_SHIFT, 5);
-        *val = data->moc_data;
+        PR_INFO("IIO_CHAN_INFO_RAW");
+        *val = data->moc_data++;
+        PR_INFO("exit");
         return IIO_VAL_INT;
-    // case IIO_CHAN_INFO_SCALE:
-    // 	ret = bma220_read_reg(data->spi_device, BMA220_REG_RANGE);
-    // 	if (ret < 0)
-    // 		return ret;
-    // 	range_idx = ret & BMA220_RANGE_MASK;
-    // 	*val = bma220_scale_table[range_idx][0];
-    // 	*val2 = bma220_scale_table[range_idx][1];
-    // 	return IIO_VAL_INT_PLUS_MICRO;
+    case IIO_CHAN_INFO_SCALE:
+    	*val = moc_range[chan->channel][0];
+    	*val2 = moc_range[chan->channel][1];
+    	return IIO_VAL_INT_PLUS_MICRO;
     }
 
+    PR_INFO("exit");
     return -EINVAL;
 #else
     PR_INFO("entry");
@@ -225,11 +263,13 @@ static int moc_iio_remove(struct platform_device *pdev)
 
     indio_dev = platform_get_drvdata(pdev);
 
+    PR_INFO("pre iio_device_unregister()");
+
     /* unregister device from iio subsystem */
     iio_device_unregister(indio_dev);
+    iio_triggered_buffer_cleanup(indio_dev);
 
-    /* free iio device memory */
-    iio_device_free(indio_dev);
+    PR_INFO("pre iio_device_free()");
 
     PR_INFO("exit");
 
@@ -248,15 +288,25 @@ moc_trigger_handler(int irq, void *p)
 
     mutex_lock(&data->lock);
 
+    PR_INFO("isr 0");
+
     for (moc_idx = 0; moc_idx < ARRAY_SIZE(moc_channels) - 1; moc_idx++) {
         data->buffer[moc_idx] = moc_idx + data->moc_data;
     }
     data->moc_data++;
+    PR_INFO("isr 1");
 
     iio_push_to_buffers_with_timestamp(indio_dev, data->buffer, pf->timestamp);
 
+    PR_INFO("isr 2");
+
     mutex_unlock(&data->lock);
+
+    PR_INFO("isr 3");
+
     iio_trigger_notify_done(indio_dev->trig);
+
+    PR_INFO("isr 4");
 
     return IRQ_HANDLED;
 }
@@ -275,7 +325,6 @@ static struct platform_driver ess_iio_moc_driver = {
     .remove = moc_iio_remove,
     .driver = {
         .name = "ess-iio-moc",
-        // .of_match_table = of_match_ptr(iio_moc_ids),
         .of_match_table = iio_moc_ids,
         .owner = THIS_MODULE,
     },

@@ -96,33 +96,77 @@ Components:
     lrwxrwxrwx 1 root root 0 Jun 30 17:18 iio:device0 -> ../../../devices/platform/soc/soc:ess-iio-moc/iio:device0
     ```
 
-- sysfs iio bus device attributes
-   ```console
-    pi@raspberrypi:~ $ ls -l  /sys/bus/iio/devices/iio\:device0/
-    total 0
-    -r--r--r-- 1 root root 4096 Jun 30 18:16 dev
-    -rw-r--r-- 1 root root 4096 Jun 30 18:16 in_voltage0_raw
-    -rw-r--r-- 1 root root 4096 Jun 30 18:16 in_voltage1_raw
-    -rw-r--r-- 1 root root 4096 Jun 30 18:16 in_voltage2_raw
-    -rw-r--r-- 1 root root 4096 Jun 30 18:16 in_voltage3_raw
-    -rw-r--r-- 1 root root 4096 Jun 30 18:16 in_voltage_scale
-    -r--r--r-- 1 root root 4096 Jun 30 18:16 name
-    lrwxrwxrwx 1 root root    0 Jun 30 18:16 of_node -> ../../../../../firmware/devicetree/base/soc/ess-iio-moc
-    drwxr-xr-x 2 root root    0 Jun 30 18:16 power
-    lrwxrwxrwx 1 root root    0 Jun 30 18:16 subsystem -> ../../../../../bus/iio
-    -rw-r--r-- 1 root root 4096 Jun 29 17:07 uevent
-   ```
+- sysfs iio bus device attributes of interest:
 
-- All channels are in. Read one and verify dmesg output
+    - out_voltage<channel>_raw - raw channel
+    - out_voltage_scale - scale shared by all channels
+    - scan_elements - channels supporting buffers
+    - trigger - associate trigger with sysfs trigger, interrupt, or hrtimer source
+
+    ```console
+        pi@raspberrypi:~ $ ls -l  /sys/bus/iio/devices/iio\:device0/
+        total 0
+        drwxr-xr-x 2 root root    0 Jul  4 17:07 buffer
+        -rw-r--r-- 1 root root 4096 Jul  4 17:07 current_timestamp_clock
+        -r--r--r-- 1 root root 4096 Jul  4 17:07 dev
+        -r--r--r-- 1 root root 4096 Jul  4 17:07 name
+        lrwxrwxrwx 1 root root    0 Jul  4 17:07 of_node -> ../../../../../firmware/devicetree/base/soc/ess-iio-moc
+        -rw-r--r-- 1 root root 4096 Jul  4 17:07 out_voltage0_raw
+        -rw-r--r-- 1 root root 4096 Jul  4 17:07 out_voltage1_raw
+        -rw-r--r-- 1 root root 4096 Jul  4 17:07 out_voltage2_raw
+        -rw-r--r-- 1 root root 4096 Jul  4 17:07 out_voltage3_raw
+        -rw-r--r-- 1 root root 4096 Jul  4 17:07 out_voltage_scale
+        drwxr-xr-x 2 root root    0 Jul  4 17:07 power
+        drwxr-xr-x 2 root root    0 Jul  4 17:07 scan_elements
+        lrwxrwxrwx 1 root root    0 Jul  4 17:07 subsystem -> ../../../../../bus/iio
+        drwxr-xr-x 2 root root    0 Jul  4 17:07 trigger
+        -rw-r--r-- 1 root root 4096 Jul  4 17:06 uevent
+    ```
+
+- inspect scan elements. "_en" extension indicates if data will be present in a triggered capture.
+    ``` console
+    pi@raspberrypi:~ $ ls -l  /sys/bus/iio/devices/iio\:device0/scan_elements/
+    total 0
+    -rw-r--r-- 1 root root 4096 Jul  4 17:56 in_timestamp_en
+    -r--r--r-- 1 root root 4096 Jul  4 17:56 in_timestamp_index
+    -r--r--r-- 1 root root 4096 Jul  4 17:56 in_timestamp_type
+    -rw-r--r-- 1 root root 4096 Jul  4 17:56 in_voltage0_en
+    -r--r--r-- 1 root root 4096 Jul  4 17:56 in_voltage0_index
+    -r--r--r-- 1 root root 4096 Jul  4 17:56 in_voltage0_type
+    -rw-r--r-- 1 root root 4096 Jul  4 17:56 in_voltage1_en
+    -r--r--r-- 1 root root 4096 Jul  4 17:56 in_voltage1_index
+    -r--r--r-- 1 root root 4096 Jul  4 17:56 in_voltage1_type
+    -rw-r--r-- 1 root root 4096 Jul  4 17:56 in_voltage2_en
+    -r--r--r-- 1 root root 4096 Jul  4 17:56 in_voltage2_index
+    -r--r--r-- 1 root root 4096 Jul  4 17:56 in_voltage2_type
+    -rw-r--r-- 1 root root 4096 Jul  4 17:56 in_voltage3_en
+    -r--r--r-- 1 root root 4096 Jul  4 17:56 in_voltage3_index
+    -r--r--r-- 1 root root 4096 Jul  4 17:56 in_voltage3_type
+    ```
+
+- scan element _type indicate format of data. in_voltage0 will be 8 active bits out of 8, requiring a 2 bit shift.
+    ```console
+    pi@raspberrypi:~ $ cat  /sys/bus/iio/devices/iio\:device0/scan_elements/in_voltage0_type 
+    le:s6/8>>2
+    ```
+
+- All channels are in. Read and verify moc incrementing value.
     ```console
     pi@raspberrypi:~ $ cat  /sys/bus/iio/devices/iio\:device0/in_voltage0_raw 
-    ```
-    ```console
-    [Jun30 20:01] iio_canonical_moc.c::moc_read_raw::(127): entry
-    [  +0.000018] iio_canonical_moc.c::moc_read_raw::(128): exit
+    0
+    pi@raspberrypi:~ $ cat  /sys/bus/iio/devices/iio\:device0/in_voltage0_raw 
+    1
     ```
 
-- Test sysfs triggering. Unable to sudo the echo directly. Needed to sudo su and then execute operations on the sysfs iio trigger. Test below adds to triggers with names sysfstig5 and sysfstrig6.
+- Channel scales. Multiply value raw value by scale to obtain scaled output.
+    ```console
+    pi@raspberrypi:~ $ cat /sys/bus/iio/devices/iio\:device0/in_voltage0_scale 
+    0.250000
+    pi@raspberrypi:~ $ cat /sys/bus/iio/devices/iio\:device0/in_voltage1_scale 
+    1.500000
+    ```
+
+- Test sysfs triggering. Unable to sudo the echo directly. Needed to sudo su and then execute operations on the sysfs iio trigger. Test below adds to triggers with names sysfstrig5 and sysfstrig6.
     ```console
     pi@raspberrypi:/sys/bus/iio/devices $ sudo echo 5 > iio_sysfs_trigger/add_trigger 
     -bash: iio_sysfs_trigger/add_trigger: Permission denied
@@ -145,6 +189,21 @@ Components:
     root@raspberrypi:/sys/bus/iio/devices# cat iio_sysfs_trigger/trigger0/name 
     sysfstrig5
     ```
+
+- Still as root, assign sysfs trigger 'sysfstrig5' to our iio:device0 device 'trigger' attribute.
+    ```console
+    root@raspberrypi:/home/pi# echo sysfstrig5 > /sys/bus/iio/devices/iio:device0/trigger/current_trigger
+    root@raspberrypi:/home/pi# cat /sys/bus/iio/devices/iio:device0/trigger/current_trigger
+    sysfstrig5
+    ```
+
+- Enable some channels to be buffered by trigger.
+    ```console
+    root@raspberrypi:/home/pi# echo 1 > /sys/bus/iio/devices/iio:device0/scan_elements/in_voltage0_en
+    root@raspberrypi:/home/pi# echo 1 > /sys/bus/iio/devices/iio:device0/scan_elements/in_voltage2_en
+    ```
+
+
 
 - iio_info utility
     ```console
