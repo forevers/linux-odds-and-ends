@@ -127,8 +127,8 @@
         ```console
         host $  mount
         ...
-        /dev/sdc1 on /media/steve/boot type vfat (rw,nosuid,nodev,relatime,uid=1001,gid=1001,fmask=0022,dmask=0022,codepage=437,iocharset=iso8859-1,shortname=mixed,showexec,utf8,flush,errors=remount-ro,uhelper=udisks2)
-        /dev/sdc2 on /media/steve/rootfs type ext4 (rw,nosuid,nodev,relatime,data=ordered,uhelper=udisks2)
+        /dev/sdc1 on /media/<user account>/boot type vfat (rw,nosuid,nodev,relatime,uid=1001,gid=1001,fmask=0022,dmask=0022,codepage=437,iocharset=iso8859-1,shortname=mixed,showexec,utf8,flush,errors=remount-ro,uhelper=udisks2)
+        /dev/sdc2 on /media/<user account>/rootfs type ext4 (rw,nosuid,nodev,relatime,data=ordered,uhelper=udisks2)
         
         host $ df -h
         ...
@@ -143,13 +143,13 @@
     - 2 options for kernel programming 1) copying over old kernel after backing up or 2) edit the config.txt file to select the kernel that the Pi will boot into
         - I'll go with 1) and copy kernel and dtbs
             ```console
-            $ sudo cp $MEDIA_PATH/boot/$KERNEL.img $MEDIA_PATH/boot/$KERNEL-backup.img
-            $ sudo cp arch/arm/boot/zImage $MEDIA_PATH/boot/$KERNEL.img
-            $ sudo cp arch/arm/boot/dts/*.dtb $MEDIA_PATH/boot/
-            $ sudo cp arch/arm/boot/dts/overlays/*.dtb* $MEDIA_PATH/boot/overlays/
-            $ sudo cp arch/arm/boot/dts/overlays/README $MEDIA_PATH/boot/overlays/
-            $ sudo umount $MEDIA_PATH/boot
-            $ sudo umount $MEDIA_PATH/rootfs
+            host $ sudo cp $MEDIA_PATH/boot/$KERNEL.img $MEDIA_PATH/boot/$KERNEL-backup.img
+            host $ sudo cp arch/arm/boot/zImage $MEDIA_PATH/boot/$KERNEL.img
+            host $ sudo cp arch/arm/boot/dts/*.dtb $MEDIA_PATH/boot/
+            host $ sudo cp arch/arm/boot/dts/overlays/*.dtb* $MEDIA_PATH/boot/overlays/
+            host $ sudo cp arch/arm/boot/dts/overlays/README $MEDIA_PATH/boot/overlays/
+            host $ sudo umount $MEDIA_PATH/boot
+            host $ sudo umount $MEDIA_PATH/rootfs
             ```
     - version
         ```console
@@ -160,45 +160,45 @@
 - 64 bit builds
     - cross compiler install
         ```console
-        $ sudo apt install crossbuild-essential-arm64
+        host $ sudo apt install crossbuild-essential-arm64
         ```
     - build kernel config
         ```console
-        $ cd linux
-        $ make mrproper
-        $ KERNEL=kernel8
-        $ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
+        host $ cd linux
+        host $ make mrproper
+        host $ KERNEL=kernel8
+        host $ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
         ```
     - to graphically modify default kernel config
         ```console
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- menuconfig
+        host $ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- menuconfig
         ```
     - build kernel, kernel modules, and dtb blob
         ```console
-        $ make -j$((`nproc`+1)) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules dtbs
+       host $ make -j$((`nproc`+1)) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules dtbs
         ```
     - install modules to rootfs
         ```console
-        $ MEDIA_PATH=<media path to rootfs and boot>
-        $ sudo env PATH=$PATH make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=$MEDIA_PATH/rootfs modules_install
+        host $ MEDIA_PATH=<media path to rootfs and boot>
+        host $ sudo env PATH=$PATH make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=$MEDIA_PATH/rootfs modules_install
         ```
     - 2 options for kernel programming 1) copying over old kernel after backing up or 2) edit the config.txt file to select the kernel that the Pi will boot into
         - I'll go with 1) and copy kernel and dtbs
             ```console
-            $ sudo cp $MEDIA_PATH/boot/$KERNEL.img $MEDIA_PATH/boot/$KERNEL-backup.img
-            $ sudo cp arch/arm64/boot/Image $MEDIA_PATH/boot/$KERNEL.img
-            $ sudo cp arch/arm64/boot/dts/broadcom/*.dtb $MEDIA_PATH/boot/
-            $ sudo cp arch/arm64/boot/dts/overlays/*.dtb* $MEDIA_PATH/boot/overlays/
-            $ sudo cp arch/arm64/boot/dts/overlays/README $MEDIA_PATH/boot/overlays/
-            $ sudo umount $MEDIA_PATH/boot
-            $ sudo umount $MEDIA_PATH/boot/rootfs
+            host $ sudo cp $MEDIA_PATH/boot/$KERNEL.img $MEDIA_PATH/boot/$KERNEL-backup.img
+            host $ sudo cp arch/arm64/boot/Image $MEDIA_PATH/boot/$KERNEL.img
+            host $ sudo cp arch/arm64/boot/dts/broadcom/*.dtb $MEDIA_PATH/boot/
+            host $ sudo cp arch/arm64/boot/dts/overlays/*.dtb* $MEDIA_PATH/boot/overlays/
+            host $ sudo cp arch/arm64/boot/dts/overlays/README $MEDIA_PATH/boot/overlays/
+            host $ sudo umount $MEDIA_PATH/boot
+            host $ sudo umount $MEDIA_PATH/boot/rootfs
             ```
     - add 'arm_64bit=1' to /boot/config.txt to boot 64bit kernel
         - https://www.raspberrypi.org/documentation/configuration/config-txt/boot.md
     - version
         ```console
-        steve@embedify:~$ cat /proc/version
-        Linux version 4.15.0-112-generic (buildd@lcy01-amd64-027) (gcc version 7.5.0 (Ubuntu 7.5.0-3ubuntu1~18.04)) #113-Ubuntu SMP Thu Jul 9 23:41:39 UTC 2020
+        pi@raspberrypi:~ $ cat /proc/version 
+        ...
         ```
 
 # TODO

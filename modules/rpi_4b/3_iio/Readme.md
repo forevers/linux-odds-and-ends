@@ -262,7 +262,7 @@ Components:
 ```console
 pi@raspberrypi: dmesg -wH
 pi@raspberrypi: sudo modprobe ess_iio_moc
-pi@raspberrypi: <tun test app>
+pi@raspberrypi: <run test app>
 pi@raspberrypi: sudo rmmod ess_iio_moc.ko
 ```
 
